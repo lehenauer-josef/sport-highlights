@@ -1,2 +1,187 @@
-# sport-highlights
-# sport-highlights
+# CFB Highlights
+
+A web app for reviewing college football (and other sports) game highlights, plus
+Python importers that pull games from the [College Football Data API](https://collegefootballdata.com)
+and find the best YouTube highlight video for each game.
+
+## Stack
+
+- **Web**: Next.js 15 (App Router), React 19, Tailwind CSS 4, Drizzle ORM.
+- **Database**: PostgreSQL 16 (Docker), exposed on host port **5433**.
+- **Importers**: Python 3.9+ scripts in `importer/`.
+
+## Project layout
+
+```
+docker-compose.yml        # Postgres 16 (container cfb_highlights_db)
+web/                      # Next.js app
+  src/app/                # routes (review UI, per-sport tabs, API routes)
+  src/db/schema.ts        # Drizzle schema
+  .env.example            # DATABASE_URL template
+importer/
+  import_games.py         # CFD API -> Postgres (games + YouTube highlights)
+  sync_airtable.py        # Airtable -> Postgres (teams + games)
+  requirements.txt        # psycopg
+  .cfbd_key               # (optional) CFD API key file
+n8n_find_highlight.py     # production highlight scorer (used by import_games.py)
+check_highlights.py       # older standalone validation harness
+```
+
+## Prerequisites
+
+- Docker (for Postgres)
+- Node.js 18+ and npm
+- Python 3.9+
+- A [College Football Data API](https://collegefootballdata.com/key) key (for `import_games.py`)
+- An Airtable Personal Access Token (only for `sync_airtable.py`)
+
+---
+
+## 1. Start the database
+
+```bash
+docker compose up -d
+```
+
+This starts Postgres on `localhost:5433` (user `cfb`, password `cfb`, database
+`highlights`). Data persists in the `cfb_db_data` volume.
+
+### Restore from the bundled dump (fastest way to get data)
+
+A compressed snapshot of the database is stored as split parts
+(`db/highlights.sql.gz.part-*`, each under 50 MB). Restore it instead of
+re-running all the importers:
+
+```bash
+docker compose up -d                                   # start Postgres first
+cat db/highlights.sql.gz.part-* | gunzip | docker exec -i cfb_highlights_db psql -U cfb -d highlights
+```
+
+This loads all teams and games (including logos and highlight picks). To refresh
+the snapshot after new imports, regenerate the parts with:
+
+```bash
+docker exec cfb_highlights_db pg_dump -U cfb -d highlights --no-owner --no-privileges | gzip > db/highlights.sql.gz
+split -b 45m db/highlights.sql.gz db/highlights.sql.gz.part- && rm db/highlights.sql.gz
+```
+
+If you restore from the dump you can skip the schema push and the importer steps
+below.
+
+## 2. Start the web application
+
+```bash
+# from the repo root
+cp web/.env.example web/.env        # first time only
+npm --prefix web install            # first time only
+npm --prefix web run dev
+```
+
+The app reads `DATABASE_URL` from `web/.env`
+(`postgres://cfb:cfb@localhost:5433/highlights`). By default Next.js serves on
+<http://localhost:3000> (it will pick the next free port, e.g. 3001, if 3000 is
+in use).
+
+Apply the schema to a fresh database with:
+
+```bash
+npm --prefix web run db:push
+```
+
+> **Note:** never run `next build` while `next dev` is running — they share
+> `web/.next` and it can corrupt the dev build. If that happens, stop dev and run
+> `rm -rf web/.next`, then restart.
+
+---
+
+## 3. Import data
+
+All importers connect via the `DATABASE_URL` environment variable (defaults to the
+docker-compose connection string if unset). Install dependencies once:
+
+```bash
+pip install -r importer/requirements.txt
+```
+
+### A. Import games + highlights from the CFD API (`import_games.py`)
+
+This is the primary importer. It fetches games from the College Football Data API,
+resolves each team against the `teams` table, searches YouTube for the best
+highlight video using the scorer in `n8n_find_highlight.py`, and upserts everything
+into Postgres.
+
+Provide your CFD API key via the `CFBD_API_KEY` environment variable **or** a
+`.cfbd_key` file in `importer/` (or the repo root):
+
+```bash
+export CFBD_API_KEY=your_key_here
+export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+```
+
+Import a single week (recommended for a first run):
+
+```bash
+python3 importer/import_games.py --season 2022 --week 4
+```
+
+Import a whole season (walks the CFD calendar and imports every started week):
+
+```bash
+python3 importer/import_games.py --season 2022
+```
+
+Common flags:
+
+| Flag                  | Description                                                        |
+| --------------------- | ----------------------------------------------------------------- |
+| `--season YEAR`       | Season/year to import (default: current year).                    |
+| `--week N`            | Only this week (skips the calendar lookup).                       |
+| `--season-type TYPE`  | Season type for `--week` (default: `regular`).                    |
+| `--limit N`           | Stop after importing N games (testing).                           |
+| `--no-highlights`     | Skip the YouTube highlight search (only import game data/FKs).    |
+| `--force-highlights`  | Re-run the search even for games that already have a video.       |
+| `--include-future`    | Also import games that have not started yet.                      |
+| `--dry-run`           | Fetch and score but do not write to Postgres.                     |
+
+Notes:
+- Games are keyed on the CFD game id; re-running updates in place.
+- A game already marked as human-reviewed is never overwritten by the search.
+- Teams are read-only: the importer only resolves existing teams, it never
+  creates or modifies them. Populate teams first via `sync_airtable.py`.
+
+### B. Sync teams (and games) from Airtable (`sync_airtable.py`)
+
+Use this to populate the `teams` table (the source of teams the CFD importer
+resolves against) and, optionally, to mirror Airtable's games.
+
+Provide your Airtable token via the `AIRTABLE_PAT` environment variable **or** a
+`.airtable_pat` file in the repo root:
+
+```bash
+export AIRTABLE_PAT=your_pat_here
+export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+
+python3 importer/sync_airtable.py                 # full sync
+python3 importer/sync_airtable.py --limit 50      # first N records (testing)
+python3 importer/sync_airtable.py --cfb-only      # only FBS/FCS games
+```
+
+---
+
+## Typical first-time setup
+
+```bash
+docker compose up -d                              # 1. database
+cp web/.env.example web/.env                      # 2. web env
+npm --prefix web install && npm --prefix web run db:push
+python3 importer/sync_airtable.py                 # 3. load teams
+export CFBD_API_KEY=your_key_here                 # 4. import games + highlights
+python3 importer/import_games.py --season 2022 --week 4
+npm --prefix web run dev                          # 5. run the app
+```
+
+## Database access
+
+```bash
+docker exec cfb_highlights_db psql -U cfb -d highlights
+```

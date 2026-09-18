@@ -1,0 +1,451 @@
+import {
+  and,
+  between,
+  desc,
+  eq,
+  inArray,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { db } from "@/db";
+import { games, teams } from "@/db/schema";
+import { conferenceTypesForSport, slugToSport } from "@/lib/sports";
+
+export const PAGE_SIZE = 24;
+
+export type SortField = "date" | "excitement" | "rank";
+
+// Team rows joined twice — once as home, once as away.
+export const homeTeam = alias(teams, "home_team");
+export const awayTeam = alias(teams, "away_team");
+
+// Flattened game shape the UI consumes (team attributes come from the join).
+export const gameColumns = {
+  id: games.id,
+  airtableId: games.airtableId,
+  externalId: games.externalId,
+  name: games.name,
+  season: games.season,
+  week: games.week,
+  type: games.type,
+  gameDate: games.gameDate,
+  location: games.location,
+  homePoints: games.homePoints,
+  awayPoints: games.awayPoints,
+  homeRank: games.homeRank,
+  awayRank: games.awayRank,
+  homeRecord: games.homeRecord,
+  awayRecord: games.awayRecord,
+  overtime: games.overtime,
+  excitementIndex: games.excitementIndex,
+  thumbnailUrl: games.thumbnailUrl,
+  videoId: games.videoId,
+  highlightsValid: games.highlightsValid,
+  highlightsChecked: games.highlightsChecked,
+  betterVideoId: games.betterVideoId,
+  reason: games.reason,
+  reviewStatus: games.reviewStatus,
+  modified: games.modified,
+  homeTeamId: games.homeTeamId,
+  awayTeamId: games.awayTeamId,
+  homeTeamName: homeTeam.name,
+  awayTeamName: awayTeam.name,
+  homeLogoUrl: homeTeam.logoUrl,
+  awayLogoUrl: awayTeam.logoUrl,
+  homeConference: homeTeam.conference,
+  awayConference: awayTeam.conference,
+  homeConferenceLogoUrl: homeTeam.conferenceLogoUrl,
+  awayConferenceLogoUrl: awayTeam.conferenceLogoUrl,
+  homeConferenceType: homeTeam.conferenceType,
+  awayConferenceType: awayTeam.conferenceType,
+  // Badge sport label derives from the home team's division.
+  conferenceType: homeTeam.conferenceType,
+};
+
+export type GameView = {
+  id: number;
+  airtableId: string;
+  externalId: string | null;
+  name: string | null;
+  season: string | null;
+  week: number | null;
+  type: string | null;
+  gameDate: Date | string | null;
+  location: string | null;
+  homePoints: number | null;
+  awayPoints: number | null;
+  homeRank: number | null;
+  awayRank: number | null;
+  homeRecord: string | null;
+  awayRecord: string | null;
+  overtime: boolean | null;
+  excitementIndex: string | null;
+  thumbnailUrl: string | null;
+  videoId: string | null;
+  highlightsValid: boolean | null;
+  highlightsChecked: boolean | null;
+  betterVideoId: string | null;
+  reason: string | null;
+  reviewStatus: string | null;
+  modified: Date | string | null;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  homeLogoUrl: string | null;
+  awayLogoUrl: string | null;
+  homeConference: string | null;
+  awayConference: string | null;
+  homeConferenceLogoUrl: string | null;
+  awayConferenceLogoUrl: string | null;
+  homeConferenceType: string | null;
+  awayConferenceType: string | null;
+  conferenceType: string | null;
+};
+
+export type GameFilters = {
+  sportLabel: string | null;
+  teams: string[];
+  season: string;
+  conference: string;
+  division: string; // "top25" | "FBS" | "FCS" | ""
+  weeks: string[]; // week numbers as strings and/or "postseason"
+  highlights: string; // "with" | "without" | ""
+  sort: SortField;
+  dir: "asc" | "desc";
+  page: number;
+};
+
+const SORT_FIELDS: SortField[] = ["date", "excitement", "rank"];
+
+function splitList(value: string | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function parseFilters(p: URLSearchParams): GameFilters {
+  const sortParam = p.get("sort") ?? "date";
+  return {
+    sportLabel: slugToSport(p.get("sport") ?? ""),
+    teams: splitList(p.get("team")),
+    season: p.get("season") ?? "",
+    conference: p.get("conference") ?? "",
+    division: p.get("division") ?? "",
+    weeks: splitList(p.get("week")),
+    highlights: p.get("highlights") ?? "",
+    sort: (SORT_FIELDS as string[]).includes(sortParam)
+      ? (sortParam as SortField)
+      : "date",
+    dir: p.get("dir") === "asc" ? "asc" : "desc",
+    page: Math.max(1, Number(p.get("page")) || 1),
+  };
+}
+
+function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
+  const conditions: SQL[] = [
+    or(
+      inArray(homeTeam.conferenceType, sportTypes),
+      inArray(awayTeam.conferenceType, sportTypes),
+    )!,
+  ];
+
+  if (f.teams.length) {
+    conditions.push(
+      or(inArray(homeTeam.name, f.teams), inArray(awayTeam.name, f.teams))!,
+    );
+  }
+  if (f.season) conditions.push(eq(games.season, f.season));
+  if (f.conference) {
+    conditions.push(
+      or(
+        eq(homeTeam.conference, f.conference),
+        eq(awayTeam.conference, f.conference),
+      )!,
+    );
+  }
+  if (f.division === "top25") {
+    conditions.push(
+      or(between(games.homeRank, 1, 25), between(games.awayRank, 1, 25))!,
+    );
+  } else if (f.division === "FBS" || f.division === "FCS") {
+    // Show the game when either team belongs to the division.
+    conditions.push(
+      or(
+        eq(homeTeam.conferenceType, f.division),
+        eq(awayTeam.conferenceType, f.division),
+      )!,
+    );
+  }
+
+  const weekNums = f.weeks
+    .filter((w) => /^\d+$/.test(w))
+    .map((w) => Number(w));
+  const wantPostseason = f.weeks.includes("postseason");
+  if (weekNums.length || wantPostseason) {
+    const parts: SQL[] = [];
+    if (weekNums.length) parts.push(inArray(games.week, weekNums));
+    if (wantPostseason) parts.push(eq(games.type, "postseason"));
+    conditions.push(or(...parts)!);
+  }
+
+  if (f.highlights === "with") {
+    conditions.push(sql`${games.videoId} is not null`);
+  } else if (f.highlights === "without") {
+    conditions.push(sql`${games.videoId} is null`);
+  }
+
+  return and(...conditions)!;
+}
+
+function buildOrderBy(f: GameFilters): SQL {
+  const expr: SQL =
+    f.sort === "excitement"
+      ? sql`${games.excitementIndex}`
+      : f.sort === "rank"
+        ? // Best (lowest) rank of either team; unranked sinks to the bottom.
+          sql`least(coalesce(${games.homeRank}, 999), coalesce(${games.awayRank}, 999))`
+        : sql`${games.gameDate}`;
+  const dir: SQL = f.dir === "asc" ? sql`asc` : sql`desc`;
+  return sql`${expr} ${dir} nulls last, ${games.id} desc`;
+}
+
+export async function fetchGames(
+  f: GameFilters,
+): Promise<{ rows: GameView[]; total: number; hasMore: boolean }> {  if (!f.sportLabel) return { rows: [], total: 0, hasMore: false };
+  const sportTypes = conferenceTypesForSport(f.sportLabel);
+  const where = buildWhere(f, sportTypes);
+
+  const [rows, countRes] = await Promise.all([
+    db
+      .select(gameColumns)
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where)
+      .orderBy(buildOrderBy(f))
+      .limit(PAGE_SIZE)
+      .offset((f.page - 1) * PAGE_SIZE),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where),
+  ]);
+
+  const total = countRes[0]?.n ?? 0;
+  return {
+    rows: rows as GameView[],
+    total,
+    hasMore: f.page * PAGE_SIZE < total,
+  };
+}
+
+// Games shown on the review queue. By default only unchecked highlights
+// (Highlights checked = false); showAll drops that restriction so already
+// checked games can be revisited. Honors the standard grid filters.
+export async function fetchReviewGames(
+  f: GameFilters,
+  opts: { showAll: boolean; limit?: number },
+): Promise<{ rows: GameView[]; total: number }> {
+  if (!f.sportLabel) return { rows: [], total: 0 };
+  const sportTypes = conferenceTypesForSport(f.sportLabel);
+  const base = buildWhere(f, sportTypes);
+  const where = opts.showAll
+    ? base
+    : and(base, eq(games.highlightsChecked, false))!;
+
+  const [rows, countRes] = await Promise.all([
+    db
+      .select(gameColumns)
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where)
+      .orderBy(buildOrderBy(f))
+      .limit(opts.limit ?? 120),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where),
+  ]);
+
+  return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
+}
+
+export async function fetchGameById(id: number): Promise<GameView | null> {  const rows = await db
+    .select(gameColumns)
+    .from(games)
+    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+    .where(eq(games.id, id))
+    .limit(1);
+  return (rows[0] as GameView) ?? null;
+}
+
+export type FormResult = {
+  gameId: number;
+  result: "W" | "L" | "T";
+  teamPoints: number;
+  oppPoints: number;
+  opponent: string | null;
+  opponentId: number | null;
+  opponentLogoUrl: string | null;
+  home: boolean;
+  week: number | null;
+  date: Date | string | null;
+};
+
+export type TeamForm = { home: FormResult[]; away: FormResult[] };
+
+// A team's last (up to 5) completed results in the same season, up to and
+// including this game's date. Never crosses into another season.
+async function recentResults(
+  teamId: number,
+  season: string,
+  onOrBeforeDate: string,
+  excludeGameId: number,
+): Promise<FormResult[]> {
+  const rows = await db
+    .select({
+      id: games.id,
+      week: games.week,
+      gameDate: games.gameDate,
+      homeTeamId: games.homeTeamId,
+      awayTeamId: games.awayTeamId,
+      homePoints: games.homePoints,
+      awayPoints: games.awayPoints,
+      homeName: homeTeam.name,
+      awayName: awayTeam.name,
+      homeLogoUrl: homeTeam.logoUrl,
+      awayLogoUrl: awayTeam.logoUrl,
+    })
+    .from(games)
+    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+    .where(
+      and(
+        eq(games.season, season),
+        or(eq(games.homeTeamId, teamId), eq(games.awayTeamId, teamId)),
+        sql`${games.homePoints} is not null`,
+        sql`${games.awayPoints} is not null`,
+        sql`${games.gameDate} <= ${onOrBeforeDate}`,
+        sql`${games.id} <> ${excludeGameId}`,
+      ),
+    )
+    .orderBy(desc(games.gameDate), desc(games.id))
+    .limit(5);
+
+  // Query is newest-first; reverse so display reads oldest -> newest.
+  return rows.reverse().map((r) => {
+    const isHome = r.homeTeamId === teamId;
+    const teamPoints = (isHome ? r.homePoints : r.awayPoints) ?? 0;
+    const oppPoints = (isHome ? r.awayPoints : r.homePoints) ?? 0;
+    const result: "W" | "L" | "T" =
+      teamPoints > oppPoints ? "W" : teamPoints < oppPoints ? "L" : "T";
+    return {
+      gameId: r.id,
+      result,
+      teamPoints,
+      oppPoints,
+      opponent: isHome ? r.awayName : r.homeName,
+      opponentId: isHome ? r.awayTeamId : r.homeTeamId,
+      opponentLogoUrl: isHome ? r.awayLogoUrl : r.homeLogoUrl,
+      home: isHome,
+      week: r.week,
+      date: r.gameDate,
+    };
+  });
+}
+
+export async function fetchTeamForm(gameId: number): Promise<TeamForm> {
+  const g = (
+    await db
+      .select({
+        season: games.season,
+        gameDate: games.gameDate,
+        homeTeamId: games.homeTeamId,
+        awayTeamId: games.awayTeamId,
+      })
+      .from(games)
+      .where(eq(games.id, gameId))
+      .limit(1)
+  )[0];
+  if (!g || !g.season) return { home: [], away: [] };
+  const raw = g.gameDate ?? new Date();
+  const date =
+    typeof raw === "string" ? raw : (raw as Date).toISOString();
+  const [home, away] = await Promise.all([
+    g.homeTeamId
+      ? recentResults(g.homeTeamId, g.season, date, gameId)
+      : Promise.resolve([]),
+    g.awayTeamId
+      ? recentResults(g.awayTeamId, g.season, date, gameId)
+      : Promise.resolve([]),
+  ]);
+  return { home, away };
+}
+
+export type FilterOptions = {
+  seasons: string[];
+  conferences: string[];
+  weeks: number[];
+  hasPostseason: boolean;
+};
+
+// Season/conference/week choices limited to the current sport.
+export async function loadFilterOptions(
+  sportTypes: string[],
+): Promise<FilterOptions> {
+  const gameScope = or(
+    inArray(homeTeam.conferenceType, sportTypes),
+    inArray(awayTeam.conferenceType, sportTypes),
+  );
+
+  const [seasons, weeks, confs, post] = await Promise.all([
+    db
+      .selectDistinct({ v: games.season })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(gameScope)
+      .orderBy(desc(games.season)),
+    db
+      .selectDistinct({ v: games.week })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(gameScope),
+    db
+      .selectDistinct({ v: teams.conference })
+      .from(teams)
+      .where(inArray(teams.conferenceType, sportTypes)),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(and(gameScope, eq(games.type, "postseason"))),
+  ]);
+
+  return {
+    seasons: seasons
+      .map((r) => r.v)
+      .filter((v): v is string => Boolean(v)),
+    conferences: confs
+      .map((r) => r.v)
+      .filter((v): v is string => Boolean(v))
+      .sort(),
+    weeks: weeks
+      .map((r) => r.v)
+      .filter((v): v is number => v != null)
+      .sort((a, b) => a - b),
+    hasPostseason: (post[0]?.n ?? 0) > 0,
+  };
+}
