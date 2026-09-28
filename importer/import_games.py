@@ -194,6 +194,83 @@ def fetch_games(key: str, season: int, season_type: str, week: int):
     return list(merged.values())
 
 
+def normalize_hex_color(value):
+    if value in (None, ""):
+        return None
+    color = str(value).strip()
+    if not color:
+        return None
+    if color.startswith("#"):
+        color = color[1:]
+    color = color.lower()
+    if len(color) == 3 and all(c in "0123456789abcdef" for c in color):
+        color = "".join([c * 2 for c in color])
+    if len(color) != 6 or not all(c in "0123456789abcdef" for c in color):
+        return None
+    return f"#{color}"
+
+
+def fetch_team_colors(key: str):
+    rows_out: list[tuple[str | None, str | None, str]] = []
+    for classification in CLASSIFICATIONS:
+        rows = cfbd_get("teams", key, classification=classification)
+        for team in rows or []:
+            if not isinstance(team, dict):
+                continue
+            color = normalize_hex_color(pick(team, "color"))
+            if not color:
+                continue
+            ext = pick(team, "id", "schoolId", "teamId")
+            school = pick(team, "school", "name", "team")
+            norm_name = scorer.normalize_text(str(school)) if school else None
+            rows_out.append((str(ext) if ext is not None else None, norm_name, color))
+    return rows_out
+
+
+def apply_team_colors(conn, team_colors):
+    if not team_colors:
+        return 0
+
+    by_ext: dict[str, int] = {}
+    by_name: dict[str, int] = {}
+    current_by_id: dict[int, str | None] = {}
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, external_id, name, color FROM teams "
+            "WHERE conference_type IS NULL "
+            "OR conference_type NOT IN ('NFL', 'NHL', 'NBA', 'Soccer')"
+        )
+        for tid, ext, name, color in cur.fetchall():
+            current_by_id[tid] = normalize_hex_color(color)
+            if ext:
+                by_ext[str(ext)] = tid
+            if name:
+                by_name[scorer.normalize_text(str(name))] = tid
+
+    updates: list[tuple[str, int]] = []
+    touched_ids: set[int] = set()
+
+    for ext, norm_name, color in team_colors:
+        team_id = by_ext.get(ext) if ext else None
+        if team_id is None and norm_name:
+            team_id = by_name.get(norm_name)
+        if team_id is None or team_id in touched_ids:
+            continue
+        if current_by_id.get(team_id) == color:
+            continue
+        updates.append((color, team_id))
+        touched_ids.add(team_id)
+
+    if not updates:
+        return 0
+
+    with conn.cursor() as cur:
+        cur.executemany("UPDATE teams SET color = %s WHERE id = %s", updates)
+
+    return len(updates)
+
+
 def load_team_maps(conn):
     """Build CFD-id -> team_id, normalized-name -> team_id, and team_id -> mascot
     maps from the teams table (read-only; teams are never modified). Only college
@@ -228,6 +305,23 @@ def resolve_team(game: dict, side: str, by_ext, by_name):
     return None
 
 
+def to_int_list(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, list):
+        return [to_int(v) for v in value]
+    if isinstance(value, tuple):
+        return [to_int(v) for v in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [to_int(v) for v in parsed]
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
 def game_row(game: dict) -> dict:
     home = pick(game, "homeTeam", "home_team")
     away = pick(game, "awayTeam", "away_team")
@@ -240,20 +334,82 @@ def game_row(game: dict) -> dict:
         "location": pick(game, "venue"),
         "home_points": to_int(pick(game, "homePoints", "home_points")),
         "away_points": to_int(pick(game, "awayPoints", "away_points")),
+        "home_line_scores": to_int_list(pick(game, "homeLineScores", "home_line_scores")),
+        "away_line_scores": to_int_list(pick(game, "awayLineScores", "away_line_scores")),
         "excitement_index": to_float(pick(game, "excitementIndex", "excitement_index")),
+        "home_rank": None,
+        "away_rank": None,
+        "home_record": None,
+        "away_record": None,
     }
+
+
+def apply_pregame_records(conn, season: int) -> int:
+    """Set home_record/away_record to each team's record *before* that game."""
+
+    def fmt(w: int, l: int, t: int) -> str:
+        return f"{w}-{l}" if t == 0 else f"{w}-{l}-{t}"
+
+    team_wlt: dict[int, tuple[int, int, int]] = {}
+    updates: list[tuple[str, str, int]] = []
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, home_team_id, away_team_id, home_points, away_points "
+            "FROM games "
+            "WHERE season = %s "
+            "AND game_date IS NOT NULL "
+            "AND home_team_id IS NOT NULL "
+            "AND away_team_id IS NOT NULL "
+            "ORDER BY game_date ASC, id ASC",
+            (str(season),),
+        )
+        rows = cur.fetchall()
+
+    for game_id, home_id, away_id, home_points, away_points in rows:
+        hw, hl, ht = team_wlt.get(home_id, (0, 0, 0))
+        aw, al, at = team_wlt.get(away_id, (0, 0, 0))
+        updates.append((fmt(hw, hl, ht), fmt(aw, al, at), game_id))
+
+        if home_points is None or away_points is None:
+            continue
+
+        if home_points > away_points:
+            team_wlt[home_id] = (hw + 1, hl, ht)
+            team_wlt[away_id] = (aw, al + 1, at)
+        elif home_points < away_points:
+            team_wlt[home_id] = (hw, hl + 1, ht)
+            team_wlt[away_id] = (aw + 1, al, at)
+        else:
+            team_wlt[home_id] = (hw, hl, ht + 1)
+            team_wlt[away_id] = (aw, al, at + 1)
+
+    if not updates:
+        return 0
+
+    with conn.cursor() as cur:
+        cur.executemany(
+            "UPDATE games SET home_record = %s, away_record = %s WHERE id = %s",
+            updates,
+        )
+
+    return len(updates)
 
 
 INSERT_SQL = """
 INSERT INTO games (
     airtable_id, external_id, name, season, week, type, game_date, location,
-    home_team_id, away_team_id, home_points, away_points, excitement_index,
-    video_id, highlights_valid, highlights_checked, review_status
+    home_team_id, away_team_id, home_points, away_points, home_line_scores,
+    away_line_scores, home_team_stats, away_team_stats, game_leaders, home_rank, away_rank,
+    home_record, away_record,
+    excitement_index, video_id, highlights_valid, highlights_checked, review_status
 ) VALUES (
     %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
     %(game_date)s, %(location)s, %(home_team_id)s, %(away_team_id)s,
-    %(home_points)s, %(away_points)s, %(excitement_index)s,
-    %(video_id)s, %(highlights_valid)s, FALSE, 'pending'
+    %(home_points)s, %(away_points)s, %(home_line_scores)s, %(away_line_scores)s,
+    %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s, %(home_rank)s, %(away_rank)s,
+    %(home_record)s, %(away_record)s,
+    %(excitement_index)s, %(video_id)s, %(highlights_valid)s, FALSE, 'pending'
 )
 """
 
@@ -401,6 +557,325 @@ def find_highlight(home, away, game_date, home_mascot, away_mascot):
     return best.get("video_id") if best else None
 
 
+def fetch_rankings(key: str, season: int, season_type: str, week: int | None = None):
+    """Fetch this week's ranking snapshot and return normalized-name -> rank."""
+    params = {"year": season, "seasonType": season_type}
+    if week is not None:
+        params["week"] = week
+    try:
+        rows = cfbd_get("rankings", key, **params)
+    except SystemExit:
+        return {}
+
+    if not rows:
+        return {}
+
+    ranking_by_name: dict[str, int] = {}
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+
+        # CFBD returns a single object like {season, week, polls:[{poll, ranks:[...]}]}.
+        if isinstance(entry.get("polls"), list):
+            for poll in entry["polls"]:
+                if not isinstance(poll, dict):
+                    continue
+                for item in poll.get("ranks") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    rank = to_int(pick(item, "rank", "ranking"))
+                    if rank is None:
+                        continue
+                    team_name = pick(item, "school", "team", "schoolName", "teamName", "name")
+                    if not team_name:
+                        continue
+                    ranking_by_name[scorer.normalize_text(str(team_name))] = rank
+            continue
+
+        candidates = []
+        if isinstance(entry.get("ranks"), list):
+            candidates = entry["ranks"]
+        elif isinstance(entry.get("rankings"), list):
+            candidates = entry["rankings"]
+        elif "rank" in entry and any(key in entry for key in ("school", "team", "schoolName", "teamName", "name")):
+            candidates = [entry]
+        else:
+            continue
+
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            rank = to_int(pick(item, "rank", "ranking"))
+            if rank is None:
+                continue
+            team_name = pick(item, "school", "team", "schoolName", "teamName", "name")
+            if not team_name:
+                continue
+            ranking_by_name[scorer.normalize_text(str(team_name))] = rank
+
+    return ranking_by_name
+
+
+def build_team_rank_map(by_name: dict[str, int], rankings: dict[str, int]) -> dict[int, int]:
+    """Map team ids in the DB to their ranking for the week."""
+    team_rank_map: dict[int, int] = {}
+    for team_key, team_id in by_name.items():
+        rank = rankings.get(team_key)
+        if rank is not None:
+            team_rank_map[team_id] = rank
+    return team_rank_map
+
+
+def coerce_stat_value(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if isinstance(value, int) else float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            if "." in text:
+                return float(text)
+            return int(text)
+        except ValueError:
+            return None
+    return None
+
+
+def normalize_team_stats(team_row):
+    if not isinstance(team_row, dict):
+        return {}
+
+    stats = team_row.get("stats") or []
+    if not isinstance(stats, list):
+        return {}
+
+    result: dict[str, int | float | None] = {}
+    for item in stats:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category") or "").strip()
+        if not category:
+            continue
+        value = coerce_stat_value(item.get("stat"))
+        if value is None:
+            continue
+
+        key = {
+            "netPassingYards": "passingYards",
+            "passingYards": "passingYards",
+            "passYards": "passingYards",
+            "rushingYards": "rushingYards",
+            "rushYards": "rushingYards",
+            "totalYards": "totalYards",
+            "tackles": "tackles",
+            "sacks": "sacks",
+            "interceptions": "interceptions",
+            "fumblesLost": "fumbles",
+            "fumbles": "fumbles",
+            "totalFumbles": "fumbles",
+        }.get(category)
+        if key is None:
+            continue
+        result[key] = value
+
+    return {
+        "passingYards": result.get("passingYards"),
+        "rushingYards": result.get("rushingYards"),
+        "totalYards": result.get("totalYards"),
+        "tackles": result.get("tackles"),
+        "sacks": result.get("sacks"),
+        "interceptions": result.get("interceptions"),
+        "fumbles": result.get("fumbles"),
+    }
+
+
+def fetch_team_stats(key: str, season: int, season_type: str, week: int | None):
+    params = {"year": season, "seasonType": season_type}
+    if week is not None:
+        params["week"] = week
+    rows = cfbd_get("games/teams", key, **params)
+    by_game: dict[str, dict[str, dict[str, int | float | None]]] = {}
+
+    for game_entry in rows or []:
+        if not isinstance(game_entry, dict):
+            continue
+        game_id = pick(game_entry, "id", "gameId", "game_id")
+        if game_id is None:
+            continue
+        for side in game_entry.get("teams") or []:
+            if not isinstance(side, dict):
+                continue
+            team_id = pick(side, "teamId", "schoolId", "team_id")
+            stats = normalize_team_stats(side)
+            if not stats:
+                continue
+            game_map = by_game.setdefault(str(game_id), {})
+            home_away = str(side.get("homeAway") or "").lower()
+            if home_away in {"home", "away"}:
+                game_map[home_away] = stats
+            if team_id is not None:
+                game_map[str(team_id)] = stats
+            team_name = pick(side, "team", "school", "name", "teamName")
+            if team_name:
+                game_map[scorer.normalize_text(str(team_name))] = stats
+
+    return by_game
+
+
+def fetch_game_leaders(key: str, season: int, season_type: str, week: int | None):
+    """Fetch player game leaders from /games/players endpoint."""
+    params = {"year": season, "seasonType": season_type}
+    if week is not None:
+        params["week"] = week
+
+    # Category -> (target key, primary stat type, supporting detail stat types)
+    leader_specs = {
+        "passing": ("passingYards", "YDS", ["C/ATT", "TD", "INT"]),
+        "rushing": ("rushingYards", "YDS", ["CAR", "TD"]),
+        "receiving": ("receivingYards", "YDS", ["REC", "TD"]),
+        "defensive_tackles": ("tackles", "TOT", ["SOLO"]),
+        "defensive_sacks": ("sacks", "SACKS", []),
+        "interceptions": ("interceptions", "INT", ["YDS", "TD"]),
+    }
+
+    def to_num(raw):
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s or s == "—":
+            return None
+        try:
+            return float(s.replace(",", ""))
+        except ValueError:
+            return None
+
+    def make_leader(category_obj, spec):
+        key_name, primary_type, detail_types = spec
+        type_maps: dict[str, dict[str, str]] = {}
+
+        for type_obj in category_obj.get("types") or []:
+            if not isinstance(type_obj, dict):
+                continue
+            tname = str(type_obj.get("name") or "").strip().upper()
+            if not tname:
+                continue
+            athletes = type_obj.get("athletes") or []
+            if not isinstance(athletes, list):
+                continue
+            bucket: dict[str, str] = {}
+            for athlete in athletes:
+                if not isinstance(athlete, dict):
+                    continue
+                aid = str(athlete.get("id") or "")
+                aname = str(athlete.get("name") or "")
+                if not aid and not aname:
+                    continue
+                ident = aid or aname
+                bucket[ident] = str(athlete.get("stat") or "").strip()
+            type_maps[tname] = bucket
+
+        primary = type_maps.get(primary_type)
+        if not primary:
+            return key_name, None
+
+        best_id = None
+        best_name = ""
+        best_raw = ""
+        best_val = -1.0
+
+        for type_obj in category_obj.get("types") or []:
+            if not isinstance(type_obj, dict):
+                continue
+            tname = str(type_obj.get("name") or "").strip().upper()
+            if tname != primary_type:
+                continue
+            for athlete in type_obj.get("athletes") or []:
+                if not isinstance(athlete, dict):
+                    continue
+                aid = str(athlete.get("id") or "")
+                aname = str(athlete.get("name") or "")
+                ident = aid or aname
+                raw = str(athlete.get("stat") or "").strip()
+                val = to_num(raw)
+                if val is None:
+                    continue
+                if val > best_val:
+                    best_val = val
+                    best_id = ident
+                    best_name = aname
+                    best_raw = raw
+
+        if best_id is None or best_val <= 0:
+            return key_name, None
+
+        detail_parts = []
+        for t in detail_types:
+            raw = type_maps.get(t, {}).get(best_id)
+            if raw and raw != "—":
+                detail_parts.append(f"{t} {raw}")
+
+        leader = {
+            "id": best_id,
+            "name": best_name,
+            "stat": int(best_val) if best_val.is_integer() else best_val,
+            "statType": primary_type,
+            "detail": " · ".join(detail_parts),
+        }
+        return key_name, leader
+
+    by_game: dict[str, dict] = {}
+
+    # Fetch all player data without category filtering
+    rows = cfbd_get("games/players", key, **params)
+
+    for game_entry in rows or []:
+        if not isinstance(game_entry, dict):
+            continue
+        game_id = pick(game_entry, "id", "gameId", "game_id")
+        if game_id is None:
+            continue
+
+        game_map = by_game.setdefault(str(game_id), {"home": {}, "away": {}})
+
+        for side in game_entry.get("teams") or []:
+            if not isinstance(side, dict):
+                continue
+
+            home_away = str(side.get("homeAway") or "").lower()
+            if home_away not in {"home", "away"}:
+                continue
+
+            side_map = game_map[home_away]
+
+            for category_obj in side.get("categories") or []:
+                if not isinstance(category_obj, dict):
+                    continue
+
+                category_name = str(category_obj.get("name") or "").strip().lower()
+
+                if category_name in {"passing", "rushing", "receiving", "interceptions"}:
+                    key_name, leader = make_leader(category_obj, leader_specs[category_name])
+                    if leader:
+                        side_map[key_name] = leader
+                    continue
+
+                if category_name == "defensive":
+                    for defensive_spec in ("defensive_tackles", "defensive_sacks"):
+                        key_name, leader = make_leader(
+                            category_obj,
+                            leader_specs[defensive_spec],
+                        )
+                        if leader:
+                            side_map[key_name] = leader
+
+    return by_game
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Import CFB games (and highlights) from the CFD API into Postgres.",
@@ -411,6 +886,8 @@ def main() -> None:
                         help="Only this week (skips the calendar lookup).")
     parser.add_argument("--season-type", default="regular",
                         help="Season type for --week (default: regular).")
+    parser.add_argument("--no-backfill", action="store_true",
+                        help="With --week, import only that week (disable regular-season 1..N backfill).")
     parser.add_argument("--limit", type=int, default=None,
                         help="Stop after importing N games (testing).")
     parser.add_argument("--no-highlights", action="store_true",
@@ -429,7 +906,10 @@ def main() -> None:
     now = datetime.now(timezone.utc)
 
     if args.week is not None:
-        weeks = [(args.season_type, args.week)]
+        if (not args.no_backfill) and args.season_type == "regular" and args.week > 1:
+            weeks = [(args.season_type, w) for w in range(1, args.week + 1)]
+        else:
+            weeks = [(args.season_type, args.week)]
     else:
         weeks = fetch_weeks(key, args.season, now)
     print(f"Season {args.season}: {len(weeks)} week(s) to import.", flush=True)
@@ -437,6 +917,11 @@ def main() -> None:
     inserted = updated = skipped_future = highlights_found = 0
 
     with psycopg.connect(db_url) as conn:
+        team_colors = fetch_team_colors(key)
+        colors_updated = apply_team_colors(conn, team_colors)
+        if colors_updated:
+            print(f"Updated colors for {colors_updated} teams.", flush=True)
+
         by_ext, by_name, mascot_by_id = load_team_maps(conn)
         print(f"Loaded {len(by_ext)} teams from Postgres.", flush=True)
 
@@ -446,6 +931,21 @@ def main() -> None:
                 break
             games = fetch_games(key, args.season, season_type, week)
             print(f"Week {week} ({season_type}): {len(games)} games.", flush=True)
+
+            # Fetch and cache the rankings for this week; used by build_team_rank_map().
+            rankings = {}
+            if week is not None:
+                try:
+                    rankings = fetch_rankings(key, args.season, season_type, week)
+                    print(f"  fetched {len(rankings)} rankings.", flush=True)
+                except Exception as exc:
+                    print(f"  rankings fetch error: {exc}", flush=True)
+
+            team_stats_by_game = fetch_team_stats(key, args.season, season_type, week)
+            game_leaders_by_game = fetch_game_leaders(key, args.season, season_type, week)
+
+            # Map team ids to their rank for this week; used when inserting/updating games.
+            team_rank_map = build_team_rank_map(by_name, rankings)
 
             for game in games:
                 row = game_row(game)
@@ -461,8 +961,38 @@ def main() -> None:
                 row["home_team_id"] = resolve_team(game, "home", by_ext, by_name)
                 row["away_team_id"] = resolve_team(game, "away", by_ext, by_name)
                 row["game_date"] = game_date
+                game_id_key = str(pick(game, "id"))
+                next_game_stats = team_stats_by_game.get(game_id_key, {})
+                home_stats = next_game_stats.get("home")
+                if home_stats is None:
+                    home_stats = next_game_stats.get(str(row["home_team_id"]))
+                if home_stats is None and home:
+                    home_stats = next_game_stats.get(scorer.normalize_text(str(home)))
+                away_stats = next_game_stats.get("away")
+                if away_stats is None:
+                    away_stats = next_game_stats.get(str(row["away_team_id"]))
+                if away_stats is None and away:
+                    away_stats = next_game_stats.get(scorer.normalize_text(str(away)))
+                row["home_team_stats"] = json.dumps(home_stats) if home_stats is not None else None
+                row["away_team_stats"] = json.dumps(away_stats) if away_stats is not None else None
+                
+                # Store game leaders (top players by category)
+                next_game_leaders = game_leaders_by_game.get(game_id_key, {})
+                has_leaders = bool(
+                    (next_game_leaders.get("home") or {})
+                    or (next_game_leaders.get("away") or {})
+                )
+                if has_leaders:
+                    row["game_leaders"] = json.dumps(next_game_leaders)
+                else:
+                    row["game_leaders"] = None
+                    
                 home_mascot = mascot_by_id.get(row["home_team_id"])
                 away_mascot = mascot_by_id.get(row["away_team_id"])
+
+                # Add rank info to the row from the cached team_rank_map.
+                row["home_rank"] = team_rank_map.get(row["home_team_id"])
+                row["away_rank"] = team_rank_map.get(row["away_team_id"])
 
                 with conn.cursor() as cur:
                     cur.execute(
@@ -479,7 +1009,10 @@ def main() -> None:
                 # Only spend a YouTube search when it can change something and
                 # the human review flag hasn't locked the choice.
                 do_search = not args.no_highlights
-                if do_search and not args.force_highlights and (highlights_valid or checked):
+                if do_search and not args.force_highlights and (highlights_valid and checked):
+                    do_search = False
+                # Skip highlight search for future games (no highlights exist yet)
+                if do_search and is_future:
                     do_search = False
 
                 if do_search:
@@ -501,12 +1034,20 @@ def main() -> None:
                         "name = %s", "season = %s", "week = %s", "type = %s",
                         "game_date = %s", "location = %s", "home_team_id = %s",
                         "away_team_id = %s", "home_points = %s", "away_points = %s",
+                        "home_line_scores = %s", "away_line_scores = %s",
+                        "home_team_stats = %s", "away_team_stats = %s", "game_leaders = %s",
+                        "home_rank = %s", "away_rank = %s",
+                        "home_record = %s", "away_record = %s",
                         "excitement_index = %s", "synced_at = NOW()",
                     ]
                     vals = [
                         row["name"], row["season"], row["week"], row["type"],
                         row["game_date"], row["location"], row["home_team_id"],
                         row["away_team_id"], row["home_points"], row["away_points"],
+                        row["home_line_scores"], row["away_line_scores"],
+                        row["home_team_stats"], row["away_team_stats"], row["game_leaders"],
+                        row["home_rank"], row["away_rank"],
+                        row["home_record"], row["away_record"],
                         row["excitement_index"],
                     ]
                     # Never clobber a human's reviewed pick; otherwise store what
@@ -537,6 +1078,13 @@ def main() -> None:
 
         if not args.dry_run:
             conn.commit()
+        
+        # Compute pregame records for all games (W-L-T snapshots before each game date)
+        if not args.dry_run:
+            records_updated = apply_pregame_records(conn, args.season)
+            if records_updated:
+                print(f"Updated pregame records for {records_updated} games.", flush=True)
+                conn.commit()
 
     print(
         f"\nDone. Inserted {inserted}, updated {updated} games "

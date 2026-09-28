@@ -1,6 +1,7 @@
 import {
   boolean,
   integer,
+  jsonb,
   numeric,
   pgTable,
   serial,
@@ -51,6 +52,11 @@ export const games = pgTable("games", {
 
   homePoints: integer("home_points"),
   awayPoints: integer("away_points"),
+  homeLineScores: integer("home_line_scores").array(),
+  awayLineScores: integer("away_line_scores").array(),
+  homeTeamStats: jsonb("home_team_stats"),
+  awayTeamStats: jsonb("away_team_stats"),
+  gameLeaders: jsonb("game_leaders"),
   homeRank: integer("home_rank"),
   awayRank: integer("away_rank"),
   homeRecord: text("home_record"),

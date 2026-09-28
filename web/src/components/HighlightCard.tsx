@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { formatDate, logoSrc, youtubeThumb, youtubeUrl } from "@/lib/format";
+import { formatDateTime, logoSrc, youtubeThumb, youtubeUrl } from "@/lib/format";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
 import { FormHover } from "@/components/TeamForm";
@@ -29,13 +29,13 @@ function TeamLine({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={logo} alt="" className="h-7 w-7 shrink-0 object-contain" />
       ) : (
-        <div className="h-7 w-7 shrink-0 rounded bg-white/10" />
+        <div className="h-7 w-7 shrink-0 rounded bg-[var(--chip-strong)]" />
       )}
-      <span className="truncate text-[15px] font-semibold">
-        {rank ? <span className="text-white/50">#{rank} </span> : null}
+      <span className="truncate text-[15px] font-semibold text-[var(--text)]">
+        {rank ? <span className="text-[var(--text-subtle)]">#{rank} </span> : null}
         {name}
         {record ? (
-          <span className="text-sm font-normal text-white/40"> ({record})</span>
+          <span className="text-sm font-normal text-[var(--text-muted)]"> ({record})</span>
         ) : null}
       </span>
       {conferenceLogo ? (
@@ -70,14 +70,14 @@ export function HighlightCard({ game }: { game: GameView }) {
   return (
     <div
       onClick={openDetail}
-      className="group/card cursor-pointer rounded-xl border border-white/10 bg-white/[0.03] transition hover:border-white/25 hover:bg-white/[0.06]"
+      className="group/card cursor-pointer rounded-xl border border-[var(--input-border)] bg-[var(--surface)] transition hover:border-[var(--text-subtle)] hover:bg-[var(--surface-soft)]"
     >
-      <div className="relative h-24 overflow-hidden rounded-t-xl bg-black sm:h-28">
+      <div className="relative h-24 overflow-hidden rounded-t-xl bg-[var(--surface-alt)] sm:h-28">
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={thumb} alt="" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/30">
+          <div className="flex h-full w-full items-center justify-center text-[var(--text-subtle)]">
             No video
           </div>
         )}
@@ -130,11 +130,15 @@ export function HighlightCard({ game }: { game: GameView }) {
           />
         </div>
 
-        <div className="flex items-center justify-between text-sm text-white/60">
+        {game.location ? (
+          <div className="text-xs text-[var(--text-muted)]">{game.location}</div>
+        ) : null}
+
+        <div className="flex items-center justify-between text-sm text-[var(--text-muted)]">
           <span>
             {game.season ? `${game.season}` : ""}
             {game.week ? ` · Wk ${game.week}` : ""}
-            {game.gameDate ? ` · ${formatDate(game.gameDate)}` : ""}
+            {game.gameDate ? ` · ${formatDateTime(game.gameDate)}` : ""}
           </span>
           {game.excitementIndex != null ? (
             <span title="Excitement Index">
@@ -143,8 +147,8 @@ export function HighlightCard({ game }: { game: GameView }) {
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between border-t border-white/10 pt-3 text-xs">
-          <span className="font-medium text-white/70 transition group-hover/card:text-white">
+        <div className="flex items-center justify-between border-t border-[var(--input-border)] pt-3 text-xs">
+          <span className="font-medium text-[var(--text-muted)] transition group-hover/card:text-[var(--text)]">
             View details →
           </span>
           {videoId ? (
@@ -153,7 +157,7 @@ export function HighlightCard({ game }: { game: GameView }) {
               target="_blank"
               rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="text-white/50 hover:text-white"
+              className="text-[var(--text-subtle)] hover:text-[var(--text)]"
             >
               YouTube ↗
             </a>

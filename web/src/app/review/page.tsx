@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import {
   conferenceTypesForSport,
   DEFAULT_REVIEW_SPORT,
@@ -6,6 +7,7 @@ import {
 } from "@/lib/sports";
 import {
   fetchReviewGames,
+  loadDefaultSeasonAndWeek,
   loadFilterOptions,
   parseFilters,
 } from "@/lib/games";
@@ -47,11 +49,42 @@ export default async function ReviewPage({
   const types = conferenceTypesForSport(sport);
   const showAll = (Array.isArray(sp.all) ? sp.all[0] : sp.all) === "1";
 
-  const filters = parseFilters(toParams(sp));
+  const params = toParams(sp);
+  params.set("sport", sportSlug);
+
+  const [options, defaultRange] = await Promise.all([
+    loadFilterOptions(types),
+    loadDefaultSeasonAndWeek(types),
+  ]);
+
+  if (!params.has("season") && defaultRange.season) {
+    params.set("season", defaultRange.season);
+  }
+  if (!params.has("week") && defaultRange.week) {
+    params.set("week", defaultRange.week);
+  }
+  if (!params.has("sort")) {
+    params.set("sort", "date");
+  }
+  if (!params.has("dir")) {
+    params.set("dir", "asc");
+  }
+
+  if (
+    !sp.season &&
+    !sp.week &&
+    !sp.sort &&
+    !sp.dir &&
+    defaultRange.season &&
+    defaultRange.week
+  ) {
+    redirect(`/review?${params.toString()}`);
+  }
+
+  const filters = parseFilters(params);
   filters.sportLabel = sport;
 
-  const [options, { rows, total }] = await Promise.all([
-    loadFilterOptions(types),
+  const [{ rows, total }] = await Promise.all([
     fetchReviewGames(filters, { showAll }),
   ]);
 

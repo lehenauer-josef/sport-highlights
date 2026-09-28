@@ -1,10 +1,65 @@
 @import "tailwindcss";
 
 :root {
+  --bg: #0b0f17;
+  --bg-elevated: rgba(11, 15, 23, 0.9);
+  --surface: #111827;
+  --surface-soft: rgba(255, 255, 255, 0.04);
+  --surface-strong: rgba(255, 255, 255, 0.1);
+  --surface-alt: rgba(17, 24, 39, 0.88);
+  --input: rgba(15, 23, 42, 0.42);
+  --input-border: rgba(255, 255, 255, 0.12);
+  --text: #e6e9ef;
+  --text-muted: rgba(230, 233, 239, 0.72);
+  --text-subtle: rgba(230, 233, 239, 0.5);
+  --shadow: rgba(15, 23, 42, 0.35);
+  --chip: rgba(255, 255, 255, 0.06);
+  --chip-strong: rgba(255, 255, 255, 0.12);
+  --success: #34d399;
+  --success-strong: #10b981;
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --warning: #fbbf24;
   color-scheme: dark;
 }
 
+html[data-theme="light"] {
+  --bg: #eef2f6;
+  --bg-elevated: rgba(255, 255, 255, 0.78);
+  --surface: #f3f5f7;
+  --surface-soft: rgba(15, 23, 42, 0.04);
+  --surface-strong: rgba(15, 23, 42, 0.08);
+  --surface-alt: #edf1f5;
+  --input: rgba(255, 255, 255, 0.8);
+  --input-border: rgba(15, 23, 42, 0.12);
+  --text: #1f2937;
+  --text-muted: rgba(31, 41, 55, 0.7);
+  --text-subtle: rgba(31, 41, 55, 0.48);
+  --shadow: rgba(15, 23, 42, 0.08);
+  --chip: rgba(15, 23, 42, 0.04);
+  --chip-strong: rgba(15, 23, 42, 0.08);
+  --success: #059669;
+  --success-strong: #047857;
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --warning: #d97706;
+  color-scheme: light;
+}
+
+html {
+  background: var(--bg);
+}
+
 body {
-  background: #0b0f17;
-  color: #e6e9ef;
+  background: var(--bg);
+  color: var(--text);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+a,
+button,
+input,
+select {
+  transition: color 0.2s ease, background-color 0.2s ease,
+    border-color 0.2s ease, transform 0.2s ease;
 }

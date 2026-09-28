@@ -38,29 +38,27 @@ export function MultiSelect({
   }
 
   const summary =
-    selected.length === 0
-      ? label
-      : `${label}: ${selected.length}`;
+    selected.length === 0 ? label : `${label}: ${selected.length}`;
 
   return (
     <div ref={boxRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm outline-none focus:border-white/30"
+        className="flex items-center gap-2 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm outline-none focus:border-[var(--text-subtle)]"
       >
-        <span className={selected.length ? "text-white" : "text-white/60"}>
+        <span className={selected.length ? "text-[var(--text)]" : "text-[var(--text-muted)]"}>
           {summary}
         </span>
-        <span className="text-white/40">▾</span>
+        <span className="text-[var(--text-subtle)]">▾</span>
       </button>
       {open ? (
-        <div className="absolute z-20 mt-1 max-h-72 w-44 overflow-auto rounded-lg border border-white/10 bg-[#111726] p-1 shadow-xl">
+        <div className="absolute z-20 mt-1 max-h-72 w-44 overflow-auto rounded-lg border border-[var(--input-border)] bg-[var(--surface-alt)] p-1 shadow-xl shadow-[var(--shadow)]">
           {selected.length > 0 ? (
             <button
               type="button"
               onClick={() => onChange([])}
-              className="mb-1 w-full rounded px-2 py-1 text-left text-xs text-white/50 hover:bg-white/10"
+              className="mb-1 w-full rounded px-2 py-1 text-left text-xs text-[var(--text-muted)] hover:bg-[var(--surface-soft)]"
             >
               Clear
             </button>
@@ -68,13 +66,13 @@ export function MultiSelect({
           {options.map((o) => (
             <label
               key={o.value}
-              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-white/10"
+              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-[var(--text)] hover:bg-[var(--surface-soft)]"
             >
               <input
                 type="checkbox"
                 checked={selected.includes(o.value)}
                 onChange={() => toggle(o.value)}
-                className="accent-white"
+                className="accent-[var(--text)]"
               />
               <span>{o.label}</span>
             </label>

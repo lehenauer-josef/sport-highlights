@@ -51,7 +51,7 @@ export function GameGrid({
   }, [hasMore, loadMore]);
 
   if (rows.length === 0) {
-    return <p className="py-16 text-center text-white/40">No games found.</p>;
+    return <p className="py-16 text-center text-[var(--text-muted)]">No games found.</p>;
   }
 
   return (
@@ -64,7 +64,7 @@ export function GameGrid({
       {hasMore ? (
         <div
           ref={sentinelRef}
-          className="py-8 text-center text-sm text-white/30"
+          className="py-8 text-center text-sm text-[var(--text-subtle)]"
         >
           Loading more…
         </div>

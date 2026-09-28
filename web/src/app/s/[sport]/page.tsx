@@ -1,8 +1,13 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Filters } from "@/components/Filters";
 import { GameGrid } from "@/components/GameGrid";
 import { GameModal } from "@/components/GameModal";
-import { fetchGames, loadFilterOptions, parseFilters } from "@/lib/games";
+import {
+  fetchGames,
+  loadDefaultSeasonAndWeek,
+  loadFilterOptions,
+  parseFilters,
+} from "@/lib/games";
 import { conferenceTypesForSport, slugToSport } from "@/lib/sports";
 
 export const dynamic = "force-dynamic";
@@ -37,10 +42,39 @@ export default async function SportPage({
   const sportTypes = conferenceTypesForSport(sportLabel);
   const sp = await searchParams;
   const searchParamsObj = toParams(sp, slug);
+
+  const [options, defaultRange] = await Promise.all([
+    loadFilterOptions(sportTypes),
+    loadDefaultSeasonAndWeek(sportTypes),
+  ]);
+
+  if (!searchParamsObj.has("season") && defaultRange.season) {
+    searchParamsObj.set("season", defaultRange.season);
+  }
+  if (!searchParamsObj.has("week") && defaultRange.week) {
+    searchParamsObj.set("week", defaultRange.week);
+  }
+  if (!searchParamsObj.has("sort")) {
+    searchParamsObj.set("sort", "date");
+  }
+  if (!searchParamsObj.has("dir")) {
+    searchParamsObj.set("dir", "asc");
+  }
+
+  if (
+    !sp.season &&
+    !sp.week &&
+    !sp.sort &&
+    !sp.dir &&
+    defaultRange.season &&
+    defaultRange.week
+  ) {
+    redirect(`/s/${slug}?${searchParamsObj.toString()}`);
+  }
+
   const filters = parseFilters(searchParamsObj);
 
-  const [options, { rows, total, hasMore }] = await Promise.all([
-    loadFilterOptions(sportTypes),
+  const [{ rows, total, hasMore }] = await Promise.all([
     fetchGames(filters),
   ]);
 

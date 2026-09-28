@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatDate, youtubeThumb, youtubeUrl } from "@/lib/format";
+import { formatDateTime, youtubeThumb, youtubeUrl } from "@/lib/format";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
 
@@ -37,7 +37,7 @@ function VideoPreview({
           />
         </a>
       ) : (
-        <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-white/5 text-xs text-white/30">
+        <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-[var(--surface-soft)] text-xs text-[var(--text-subtle)]">
           none
         </div>
       )}
@@ -83,20 +83,20 @@ export function ReviewCard({ game }: { game: GameView }) {
     "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-40";
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+    <div className="rounded-xl border border-[var(--input-border)] bg-[var(--surface)] p-4">
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h3 className="truncate font-medium">
+        <h3 className="truncate font-medium text-[var(--text)]">
           {game.awayTeamName} @ {game.homeTeamName}
         </h3>
-        <span className="shrink-0 text-xs text-white/40">
+        <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {shortSportLabel(game.conferenceType)} · {game.season}
           {game.week ? ` · Wk ${game.week}` : ""} ·{" "}
-          {formatDate(game.gameDate)}
+          {formatDateTime(game.gameDate)}
         </span>
       </div>
 
       {game.reason ? (
-        <p className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200">
+        <p className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-xs text-red-500">
           {game.reason}
         </p>
       ) : null}
@@ -105,12 +105,12 @@ export function ReviewCard({ game }: { game: GameView }) {
         <VideoPreview
           label="Current"
           videoId={game.videoId}
-          accent="text-white/60"
+          accent="text-[var(--text-muted)]"
         />
 
         <div className="flex-1">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-emerald-300">
+            <span className="text-xs font-medium text-emerald-500">
               YouTube results
             </span>
             {searchUrl ? (
@@ -118,7 +118,7 @@ export function ReviewCard({ game }: { game: GameView }) {
                 href={searchUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] text-white/50 hover:text-white"
+                className="text-[11px] text-[var(--text-subtle)] hover:text-[var(--text)]"
               >
                 Open search ↗
               </a>
@@ -130,18 +130,18 @@ export function ReviewCard({ game }: { game: GameView }) {
               type="button"
               onClick={loadResults}
               disabled={searching}
-              className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-white/15 bg-white/5 text-xs text-white/60 transition hover:bg-white/10 disabled:opacity-40"
+              className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-[var(--input-border)] bg-[var(--surface-soft)] text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-strong)] disabled:opacity-40"
             >
               {searching ? "Searching…" : "🔍 Search YouTube"}
             </button>
           ) : results.length === 0 ? (
-            <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-lg bg-white/5 px-3 text-center text-xs text-white/30">
+            <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-lg bg-[var(--surface-soft)] px-3 text-center text-xs text-[var(--text-subtle)]">
               <span>No results found.</span>
               <button
                 type="button"
                 onClick={loadResults}
                 disabled={searching}
-                className="rounded bg-white/10 px-2 py-1 text-white/70 hover:bg-white/20 disabled:opacity-40"
+                className="rounded bg-[var(--chip-strong)] px-2 py-1 text-[var(--text)] hover:bg-[var(--surface-strong)] disabled:opacity-40"
               >
                 Retry
               </button>
@@ -173,14 +173,14 @@ export function ReviewCard({ game }: { game: GameView }) {
                       href={youtubeUrl(r.videoId) ?? "#"}
                       target="_blank"
                       rel="noreferrer"
-                      className="line-clamp-2 text-xs text-white/80 hover:text-white"
+                      className="line-clamp-2 text-xs text-[var(--text)] hover:text-[var(--text-muted)]"
                       title={r.title}
                     >
                       {r.title}
                     </a>
                     <div className="mt-0.5 flex items-center gap-2">
                       {r.channel ? (
-                        <span className="truncate text-[10px] text-white/40">
+                        <span className="truncate text-[10px] text-[var(--text-subtle)]">
                           {r.channel}
                         </span>
                       ) : null}
@@ -208,7 +208,7 @@ export function ReviewCard({ game }: { game: GameView }) {
           value={manual}
           onChange={(e) => setManual(e.target.value)}
           placeholder="Paste a YouTube URL or video ID"
-          className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:border-white/30 focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:border-[var(--text-subtle)] focus:outline-none"
         />
         <button
           type="button"

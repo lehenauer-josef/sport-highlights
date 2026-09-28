@@ -34,6 +34,11 @@ export const gameColumns = {
   location: games.location,
   homePoints: games.homePoints,
   awayPoints: games.awayPoints,
+  homeLineScores: games.homeLineScores,
+  awayLineScores: games.awayLineScores,
+  homeTeamStats: games.homeTeamStats,
+  awayTeamStats: games.awayTeamStats,
+  gameLeaders: games.gameLeaders,
   homeRank: games.homeRank,
   awayRank: games.awayRank,
   homeRecord: games.homeRecord,
@@ -60,6 +65,8 @@ export const gameColumns = {
   awayConferenceLogoUrl: awayTeam.conferenceLogoUrl,
   homeConferenceType: homeTeam.conferenceType,
   awayConferenceType: awayTeam.conferenceType,
+  homeTeamColor: homeTeam.color,
+  awayTeamColor: awayTeam.color,
   // Badge sport label derives from the home team's division.
   conferenceType: homeTeam.conferenceType,
 };
@@ -76,6 +83,11 @@ export type GameView = {
   location: string | null;
   homePoints: number | null;
   awayPoints: number | null;
+  homeLineScores: number[] | null;
+  awayLineScores: number[] | null;
+  homeTeamStats: Record<string, number | null> | null;
+  awayTeamStats: Record<string, number | null> | null;
+  gameLeaders: Record<string, unknown> | null;
   homeRank: number | null;
   awayRank: number | null;
   homeRecord: string | null;
@@ -102,6 +114,8 @@ export type GameView = {
   awayConferenceLogoUrl: string | null;
   homeConferenceType: string | null;
   awayConferenceType: string | null;
+  homeTeamColor: string | null;
+  awayTeamColor: string | null;
   conferenceType: string | null;
 };
 
@@ -112,7 +126,7 @@ export type GameFilters = {
   conference: string;
   division: string; // "top25" | "FBS" | "FCS" | ""
   weeks: string[]; // week numbers as strings and/or "postseason"
-  highlights: string; // "with" | "without" | ""
+  highlights: string; // "with" | "without" | "checked" | ""
   sort: SortField;
   dir: "asc" | "desc";
   page: number;
@@ -129,6 +143,8 @@ function splitList(value: string | null): string[] {
 
 export function parseFilters(p: URLSearchParams): GameFilters {
   const sortParam = p.get("sort") ?? "date";
+  const dirParam = p.get("dir") ?? "asc";
+  const highlightsParam = p.get("highlights") ?? "";
   return {
     sportLabel: slugToSport(p.get("sport") ?? ""),
     teams: splitList(p.get("team")),
@@ -136,12 +152,47 @@ export function parseFilters(p: URLSearchParams): GameFilters {
     conference: p.get("conference") ?? "",
     division: p.get("division") ?? "",
     weeks: splitList(p.get("week")),
-    highlights: p.get("highlights") ?? "",
+    highlights: ["with", "without", "checked"].includes(highlightsParam)
+      ? highlightsParam
+      : "",
     sort: (SORT_FIELDS as string[]).includes(sortParam)
       ? (sortParam as SortField)
       : "date",
-    dir: p.get("dir") === "asc" ? "asc" : "desc",
+    dir: dirParam === "asc" ? "asc" : "desc",
     page: Math.max(1, Number(p.get("page")) || 1),
+  };
+}
+
+export async function loadDefaultSeasonAndWeek(
+  sportTypes: string[],
+  now = new Date(),
+): Promise<{ season: string | null; week: string | null }> {
+  const cutoff = now.toISOString();
+  const rows = await db
+    .selectDistinct({ season: games.season, week: games.week })
+    .from(games)
+    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+    .where(
+      and(
+        or(
+          inArray(homeTeam.conferenceType, sportTypes),
+          inArray(awayTeam.conferenceType, sportTypes),
+        )!,
+        sql`${games.gameDate} is not null`,
+        sql`${games.gameDate} <= ${cutoff}`,
+      ),
+    )
+    .orderBy(desc(games.season), desc(games.week));
+
+  if (!rows.length) return { season: null, week: null };
+
+  const season = rows[0]?.season ?? null;
+  const week = rows.find((r) => r.season === season)?.week ?? null;
+
+  return {
+    season: season ?? null,
+    week: week == null ? null : String(week),
   };
 }
 
@@ -196,6 +247,8 @@ function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
     conditions.push(sql`${games.videoId} is not null`);
   } else if (f.highlights === "without") {
     conditions.push(sql`${games.videoId} is null`);
+  } else if (f.highlights === "checked") {
+    conditions.push(eq(games.highlightsChecked, true));
   }
 
   return and(...conditions)!;

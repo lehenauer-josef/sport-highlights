@@ -31,6 +31,18 @@ export function formatDate(date: Date | string | null): string {
   });
 }
 
+export function formatDateTime(date: Date | string | null): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 // A game needs review when it has no valid highlight, or the scorer proposed a
 // better match, unless it was manually approved/rejected.
 export function needsReview(game: Game): boolean {

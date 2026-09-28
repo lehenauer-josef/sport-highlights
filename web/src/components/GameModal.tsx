@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { formatDate, logoSrc, youtubeUrl } from "@/lib/format";
+import {
+  formatDate,
+  formatDateTime,
+  logoSrc,
+  youtubeThumb,
+  youtubeUrl,
+} from "@/lib/format";
 import type { FormResult, GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
 import { setShowResults, useShowResults } from "@/lib/prefs";
 import { FormList, loadForm } from "@/components/TeamForm";
+import { GameLeaders } from "@/components/GameLeaders";
 
 function TeamRow({
   name,
@@ -16,8 +23,10 @@ function TeamRow({
   conferenceLogo,
   record,
   points,
+  lineScores,
   showPoints,
   form,
+  collegeGame,
 }: {
   name: string | null;
   rank: number | null;
@@ -26,22 +35,40 @@ function TeamRow({
   conferenceLogo: string | null;
   record: string | null;
   points: number | null;
+  lineScores: number[] | null;
   showPoints: boolean;
   form: FormResult[] | null;
+  collegeGame: boolean;
 }) {
+  const hasLineScores = collegeGame && Array.isArray(lineScores) && lineScores.length > 0;
+  const scoreLabels = ["1", "2", "3", "4"];
+  if (hasLineScores && lineScores.length > 4) scoreLabels.push("OT");
+  scoreLabels.push("T");
+
+  const scoreCells = hasLineScores
+    ? [...lineScores.slice(0, 4), ...(lineScores.length > 4 ? [lineScores[4]] : []), points ?? lineScores.reduce((sum, n) => sum + n, 0)]
+    : [];
+
+  const scoreGrid = hasLineScores && (lineScores?.length ?? 0) > 4 ? "grid-cols-6" : "grid-cols-5";
+
   return (
     <div className="flex items-center gap-3">
       {logo ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={logo} alt="" className="h-10 w-10 shrink-0 object-contain" />
       ) : (
-        <div className="h-10 w-10 shrink-0 rounded bg-white/10" />
+        <div className="h-10 w-10 shrink-0 rounded bg-[var(--chip-strong)]" />
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-medium">
-            {rank ? <span className="text-white/50">#{rank} </span> : null}
+          <span className="truncate font-medium text-[var(--text)]">
+            {rank ? <span className="text-[var(--text-subtle)]">#{rank} </span> : null}
             {name ?? "TBD"}
+            {record ? (
+              <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">
+                ({record})
+              </span>
+            ) : null}
           </span>
           {conferenceLogo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -53,22 +80,36 @@ function TeamRow({
             />
           ) : null}
         </div>
-        <div className="text-xs text-white/40">
-          {[conference, record ? `(${record})` : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
+        <div className="text-xs text-[var(--text-muted)]">{conference ?? ""}</div>
         {form && form.length ? (
           <div className="mt-2">
-            <span className="mb-1.5 block text-[10px] uppercase tracking-wide text-white/30">
+            <span className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--text-subtle)]">
               Last 5
             </span>
             <FormList results={form} />
           </div>
         ) : null}
       </div>
-      {showPoints && points != null ? (
-        <span className="text-2xl font-semibold tabular-nums">{points}</span>
+      {showPoints && hasLineScores ? (
+        <div className="ml-auto flex shrink-0 flex-col items-end">
+          <div className={`grid ${scoreGrid} gap-2 text-center text-[11px] font-medium text-[var(--text-subtle)]`}>
+            {scoreLabels.map((label) => (
+              <span key={`${name}-${label}`} className="w-6 text-center">
+                {label}
+              </span>
+            ))}
+          </div>
+          <div className={`mt-1 grid ${scoreGrid} gap-2 text-center text-base font-semibold tabular-nums text-[var(--text)]`}>
+            {scoreCells.map((value, index) => (
+              <span key={`${name}-cell-${index}`} className="w-6 text-center">
+                {value ?? ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {!hasLineScores && showPoints && points != null ? (
+        <span className="text-2xl font-semibold tabular-nums text-[var(--text)]">{points}</span>
       ) : null}
     </div>
   );
@@ -77,10 +118,165 @@ function TeamRow({
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-white/40">
+      <div className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
         {label}
       </div>
-      <div className="text-sm text-white/80">{value}</div>
+      <div className="text-sm text-[var(--text)]">{value}</div>
+    </div>
+  );
+}
+
+function TeamStatChart({
+  game,
+  collapsed,
+  onToggle,
+}: {
+  game: GameView;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  function chartColor(raw: string | null | undefined, fallback: string): string {
+    const value = String(raw ?? "").trim();
+    if (!value) return fallback;
+    const normalized = value.startsWith("#") ? value : `#${value}`;
+    if (/^#[0-9a-fA-F]{6}$/.test(normalized) || /^#[0-9a-fA-F]{3}$/.test(normalized)) {
+      return normalized;
+    }
+    return fallback;
+  }
+
+  const statDefs = [
+    { key: "passingYards", label: "Pass Yds" },
+    { key: "rushingYards", label: "Rush Yds" },
+    { key: "totalYards", label: "Total Yds" },
+    { key: "tackles", label: "Tackles" },
+    { key: "sacks", label: "Sacks" },
+    { key: "interceptions", label: "Interceptions" },
+    { key: "fumbles", label: "Fumbles" },
+  ] as const;
+
+  const values = statDefs
+    .map((stat) => ({
+      ...stat,
+      home: game.homeTeamStats?.[stat.key] ?? null,
+      away: game.awayTeamStats?.[stat.key] ?? null,
+    }))
+    .filter((stat) => stat.home != null || stat.away != null);
+
+  if (!values.length) return null;
+
+  const homeName = game.homeTeamName ?? "Home";
+  const awayName = game.awayTeamName ?? "Away";
+  const homeBarColor = chartColor(game.homeTeamColor, "#1d4ed8");
+  const awayBarColor = chartColor(game.awayTeamColor, "#d8362f");
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--input-border)] bg-[var(--surface)] shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+      <div className="border-b border-[var(--input-border)] px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex w-full items-center justify-between text-left"
+          aria-expanded={!collapsed}
+        >
+          <div className="text-[14px] font-black uppercase tracking-[0.12em] text-[var(--text)]">
+            Team Stats
+          </div>
+          <span className="text-xs text-[var(--text-subtle)]">
+            {collapsed ? "Show" : "Hide"}
+          </span>
+        </button>
+      </div>
+
+      {collapsed ? null : (
+        <div className="space-y-1.5 px-4 py-2.5">
+        <div className="flex items-center justify-between pb-1.5">
+          <div className="flex items-center gap-2 text-left">
+            {game.homeLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoSrc(game.homeTeamId, "team") || game.homeLogoUrl} alt="" className="h-8 w-8 object-contain" />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-strong)] text-[10px] font-black uppercase text-[var(--text)]">
+                {homeName.slice(0, 2)}
+              </div>
+            )}
+            <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text)]">
+              {homeName}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-right">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text)]">
+              {awayName}
+            </div>
+            {game.awayLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoSrc(game.awayTeamId, "team") || game.awayLogoUrl} alt="" className="h-8 w-8 object-contain" />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-strong)] text-[10px] font-black uppercase text-[var(--text)]">
+                {awayName.slice(0, 2)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {values.map((stat) => {
+          const homeValue = stat.home ?? 0;
+          const awayValue = stat.away ?? 0;
+          const max = Math.max(homeValue, awayValue, 1);
+          const homeWidth = Math.max(0, (homeValue / max) * 100);
+          const awayWidth = Math.max(0, (awayValue / max) * 100);
+          const homeLabel = stat.home == null ? "—" : stat.home;
+          const awayLabel = stat.away == null ? "—" : stat.away;
+
+          return (
+            <div key={stat.key} className="border-t border-[var(--input-border)] pt-2 first:border-t-0 first:pt-0">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                <div className="text-right text-[clamp(1rem,1.5vw,1.5rem)] font-black leading-none tracking-[-0.04em] text-[var(--text)] tabular-nums">
+                  {homeLabel}
+                </div>
+
+                <div className="min-w-[92px] text-center text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-subtle)]">
+                  {stat.label}
+                </div>
+
+                <div className="text-left text-[clamp(1rem,1.5vw,1.5rem)] font-black leading-none tracking-[-0.04em] text-[var(--text)] tabular-nums">
+                  {awayLabel}
+                </div>
+              </div>
+
+              <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                <div className="relative h-2 overflow-hidden rounded-full bg-[var(--chip-strong)]">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{
+                      backgroundColor: homeBarColor,
+                      width: `${homeWidth}%`,
+                      backgroundImage:
+                        "repeating-linear-gradient(135deg, rgba(255,255,255,0.18) 0, rgba(255,255,255,0.18) 2px, transparent 2px, transparent 6px)",
+                    }}
+                  />
+                </div>
+
+                <div className="w-0" />
+
+                <div className="relative h-2 overflow-hidden rounded-full bg-[var(--chip-strong)]">
+                  <div
+                    className="absolute inset-y-0 right-0 rounded-full"
+                    style={{
+                      backgroundColor: awayBarColor,
+                      width: `${awayWidth}%`,
+                      backgroundImage:
+                        "repeating-linear-gradient(135deg, rgba(255,255,255,0.18) 0, rgba(255,255,255,0.18) 2px, transparent 2px, transparent 6px)",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        </div>
+      )}
     </div>
   );
 }
@@ -99,6 +295,8 @@ export function GameModal() {
     away: FormResult[];
   } | null>(null);
   const showResults = useShowResults();
+  const [teamStatsCollapsed, setTeamStatsCollapsed] = useState(false);
+  const [gameLeadersCollapsed, setGameLeadersCollapsed] = useState(false);
 
   const close = useCallback(() => {
     const next = new URLSearchParams(params.toString());
@@ -146,6 +344,7 @@ export function GameModal() {
   if (!gameId) return null;
 
   const videoId = game?.videoId ?? null;
+  const isNflGame = game?.conferenceType === "NFL";
   const meta: { label: string; value: string }[] = [];
   if (game) {
     if (game.season) meta.push({ label: "Season", value: game.season });
@@ -155,7 +354,7 @@ export function GameModal() {
       meta.push({ label: "Week", value: `Week ${game.week}` });
     }
     if (game.gameDate) {
-      meta.push({ label: "Date", value: formatDate(game.gameDate) });
+      meta.push({ label: "Date", value: formatDateTime(game.gameDate) });
     }
     if (game.location) meta.push({ label: "Location", value: game.location });
     if (game.excitementIndex != null) {
@@ -175,29 +374,51 @@ export function GameModal() {
       onClick={close}
     >
       <div
-        className="relative my-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl"
+        className="relative my-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--input-border)] bg-[var(--surface-alt)] shadow-2xl shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={close}
           aria-label="Close"
-          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-lg text-white/80 transition hover:bg-black/80 hover:text-white"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--chip-strong)] text-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--text)]"
         >
           ✕
         </button>
 
-        <div className="relative aspect-video bg-black">
+        <div className="relative aspect-video bg-[var(--surface-alt)]">
           {videoId ? (
-            <iframe
-              className="h-full w-full"
-              src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
-              title={game?.name ?? "highlight"}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+            isNflGame ? (
+              <a
+                href={youtubeUrl(videoId) ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="group block h-full w-full"
+                aria-label="Open highlight on YouTube"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={youtubeThumb(videoId) ?? ""}
+                  alt={game?.name ?? "highlight thumbnail"}
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/25 transition group-hover:bg-black/15">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 text-2xl text-white shadow-lg">
+                    ▶
+                  </div>
+                </div>
+              </a>
+            ) : (
+              <iframe
+                className="h-full w-full"
+                src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
+                title={game?.name ?? "highlight"}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            )
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-white/30">
+            <div className="flex h-full w-full items-center justify-center text-[var(--text-subtle)]">
               {loading ? "Loading…" : error ? "Game not found" : "No video"}
             </div>
           )}
@@ -207,7 +428,7 @@ export function GameModal() {
           <div className="space-y-4 p-5">
             <div className="flex flex-wrap items-center gap-2">
               {shortSportLabel(game.conferenceType) ? (
-                <span className="rounded bg-white/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-white/70">
+                <span className="rounded bg-[var(--chip)] px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
                   {shortSportLabel(game.conferenceType)}
                 </span>
               ) : null}
@@ -216,7 +437,7 @@ export function GameModal() {
                   needs review
                 </span>
               ) : null}
-              <label className="ml-auto flex cursor-pointer select-none items-center gap-2 text-xs text-white/60">
+              <label className="ml-auto flex cursor-pointer select-none items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>Show result</span>
                 <button
                   type="button"
@@ -224,7 +445,7 @@ export function GameModal() {
                   aria-checked={showResults}
                   onClick={() => setShowResults(!showResults)}
                   className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
-                    showResults ? "bg-emerald-500" : "bg-white/20"
+                    showResults ? "bg-emerald-500" : "bg-[var(--chip-strong)]"
                   }`}
                 >
                   <span
@@ -249,10 +470,12 @@ export function GameModal() {
                 }
                 record={game.awayRecord}
                 points={game.awayPoints}
+                lineScores={game.awayLineScores}
                 showPoints={showResults}
                 form={form?.away ?? null}
+                collegeGame={game.conferenceType === "FBS" || game.conferenceType === "FCS"}
               />
-              <div className="text-center text-[11px] uppercase tracking-widest text-white/30">
+              <div className="text-center text-[11px] uppercase tracking-widest text-[var(--text-subtle)]">
                 at
               </div>
               <TeamRow
@@ -267,13 +490,37 @@ export function GameModal() {
                 }
                 record={game.homeRecord}
                 points={game.homePoints}
+                lineScores={game.homeLineScores}
                 showPoints={showResults}
                 form={form?.home ?? null}
+                collegeGame={game.conferenceType === "FBS" || game.conferenceType === "FCS"}
               />
             </div>
 
+            {game.location ? (
+              <div className="mt-2 text-center text-base text-[var(--text)]">
+                {game.location}
+              </div>
+            ) : null}
+
+            {(game.conferenceType === "FBS" || game.conferenceType === "FCS") ? (
+              <TeamStatChart
+                game={game}
+                collapsed={teamStatsCollapsed}
+                onToggle={() => setTeamStatsCollapsed((v) => !v)}
+              />
+            ) : null}
+
+            {(game.conferenceType === "FBS" || game.conferenceType === "FCS") ? (
+              <GameLeaders
+                game={game}
+                collapsed={gameLeadersCollapsed}
+                onToggle={() => setGameLeadersCollapsed((v) => !v)}
+              />
+            ) : null}
+
             {meta.length ? (
-              <div className="grid grid-cols-2 gap-3 border-t border-white/10 pt-4 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 border-t border-[var(--input-border)] pt-4 sm:grid-cols-3">
                 {meta.map((m) => (
                   <Meta key={m.label} label={m.label} value={m.value} />
                 ))}
@@ -281,21 +528,21 @@ export function GameModal() {
             ) : null}
 
             {game.reason ? (
-              <div className="border-t border-white/10 pt-4">
-                <div className="text-[11px] uppercase tracking-wide text-white/40">
+              <div className="border-t border-[var(--input-border)] pt-4">
+                <div className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
                   Note
                 </div>
-                <div className="text-sm text-white/70">{game.reason}</div>
+                <div className="text-sm text-[var(--text-muted)]">{game.reason}</div>
               </div>
             ) : null}
 
             {videoId ? (
-              <div className="border-t border-white/10 pt-4">
+              <div className="border-t border-[var(--input-border)] pt-4">
                 <a
                   href={youtubeUrl(videoId) ?? "#"}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sm text-white/60 hover:text-white"
+                  className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
                 >
                   Watch on YouTube ↗
                 </a>
@@ -303,7 +550,7 @@ export function GameModal() {
             ) : null}
           </div>
         ) : (
-          <div className="p-6 text-center text-sm text-white/50">
+          <div className="p-6 text-center text-sm text-[var(--text-muted)]">
             {loading ? "Loading game…" : error ? "Game not found." : null}
           </div>
         )}

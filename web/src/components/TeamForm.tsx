@@ -32,7 +32,7 @@ function ResultBadge({ result }: { result: FormResult["result"] }) {
           ? "bg-emerald-500/80 text-black"
           : result === "L"
             ? "bg-red-500/80 text-black"
-            : "bg-white/25 text-white"
+            : "bg-[var(--chip-strong)] text-[var(--text)]"
       }`}
     >
       {result}
@@ -43,7 +43,7 @@ function ResultBadge({ result }: { result: FormResult["result"] }) {
 // Compact W/L squares (used as the summary strip).
 export function FormBadges({ results }: { results: FormResult[] }) {
   if (!results.length) {
-    return <span className="text-xs text-white/40">No recent games</span>;
+    return <span className="text-xs text-[var(--text-muted)]">No recent games</span>;
   }
   return (
     <span className="flex items-center gap-1">
@@ -57,14 +57,14 @@ export function FormBadges({ results }: { results: FormResult[] }) {
 // Detailed rows: result, home/away (@), opponent logo + name, score, date.
 export function FormList({ results }: { results: FormResult[] }) {
   if (!results.length) {
-    return <span className="text-xs text-white/40">No recent games</span>;
+    return <span className="text-xs text-[var(--text-muted)]">No recent games</span>;
   }
   return (
     <div className="flex flex-col gap-1.5">
       {results.map((r) => (
         <div key={r.gameId} className="flex items-center gap-2 text-xs">
           <ResultBadge result={r.result} />
-          <span className="w-5 shrink-0 text-center text-white/40">
+          <span className="w-5 shrink-0 text-center text-[var(--text-muted)]">
             {r.home ? "vs" : "@"}
           </span>
           {r.opponentLogoUrl && r.opponentId ? (
@@ -75,17 +75,17 @@ export function FormList({ results }: { results: FormResult[] }) {
               className="h-4 w-4 shrink-0 object-contain"
             />
           ) : (
-            <span className="h-4 w-4 shrink-0 rounded bg-white/10" />
+            <span className="h-4 w-4 shrink-0 rounded bg-[var(--chip-strong)]" />
           )}
-          <span className="min-w-0 flex-1 truncate text-white/80">
+          <span className="min-w-0 flex-1 truncate text-[var(--text)]">
             {r.opponent ?? "?"}
           </span>
-          <span className="shrink-0 tabular-nums text-white/60">
+          <span className="shrink-0 tabular-nums text-[var(--text-muted)]">
             {r.teamPoints}
             {"\u2013"}
             {r.oppPoints}
           </span>
-          <span className="shrink-0 text-white/40">{shortDate(r.date)}</span>
+          <span className="shrink-0 text-[var(--text-subtle)]">{shortDate(r.date)}</span>
         </div>
       ))}
     </div>
@@ -137,18 +137,18 @@ export function FormHover({
       onClick={(e) => e.stopPropagation()}
     >
       <span
-        className="cursor-help text-white/35 transition hover:text-white/70"
+        className="cursor-help text-[var(--text-subtle)] transition hover:text-[var(--text-muted)]"
         title="Recent form"
       >
         <ChartIcon />
       </span>
       {open ? (
-        <span className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-white/10 bg-neutral-900 px-2.5 py-2 shadow-xl">
-          <span className="mb-1.5 block text-[10px] uppercase tracking-wide text-white/40">
+        <span className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-[var(--input-border)] bg-[var(--surface-alt)] px-2.5 py-2 shadow-xl shadow-[var(--shadow)]">
+          <span className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--text-subtle)]">
             Last 5
           </span>
           {results == null ? (
-            <span className="text-xs text-white/40">Loading…</span>
+            <span className="text-xs text-[var(--text-muted)]">Loading…</span>
           ) : (
             <FormList results={results} />
           )}

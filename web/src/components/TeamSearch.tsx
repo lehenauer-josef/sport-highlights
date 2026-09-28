@@ -66,18 +66,18 @@ export function TeamSearch({
 
   return (
     <div ref={boxRef} className="relative min-w-56">
-      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 focus-within:border-white/30">
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-2 py-1 focus-within:border-[var(--text-subtle)]">
         {selected.map((t) => (
           <span
             key={t}
-            className="flex items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-xs"
+            className="flex items-center gap-1 rounded bg-[var(--chip)] px-1.5 py-0.5 text-xs text-[var(--text)]"
           >
             {t}
             <button
               type="button"
               aria-label={`Remove ${t}`}
               onClick={() => remove(t)}
-              className="text-white/50 hover:text-white"
+              className="text-[var(--text-subtle)] hover:text-[var(--text)]"
             >
               ×
             </button>
@@ -98,18 +98,18 @@ export function TeamSearch({
             }
           }}
           placeholder={selected.length ? "" : "Search teams…"}
-          className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm outline-none"
+          className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
         />
       </div>
 
       {open && suggestions.length > 0 ? (
-        <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-white/10 bg-[#111726] py-1 shadow-xl">
+        <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-[var(--input-border)] bg-[var(--surface-alt)] py-1 shadow-xl shadow-[var(--shadow)]">
           {suggestions.map((it) => (
             <li key={it.name}>
               <button
                 type="button"
                 onClick={() => add(it.name)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-white/10"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--surface-soft)]"
               >
                 {it.logo ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -119,7 +119,7 @@ export function TeamSearch({
                     className="h-5 w-5 shrink-0 object-contain"
                   />
                 ) : (
-                  <span className="h-5 w-5 shrink-0 rounded bg-white/10" />
+                  <span className="h-5 w-5 shrink-0 rounded bg-[var(--chip-strong)]" />
                 )}
                 <span className="truncate">{it.name}</span>
               </button>

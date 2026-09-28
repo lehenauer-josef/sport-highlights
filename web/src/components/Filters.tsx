@@ -46,7 +46,7 @@ export function Filters({
   }
 
   const select =
-    "rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm outline-none focus:border-white/30";
+    "rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--text-subtle)]";
 
   const teams = splitList(params.get("team"));
   const weeks = splitList(params.get("week"));
@@ -117,10 +117,11 @@ export function Filters({
         <option value="">All highlights</option>
         <option value="with">With highlights</option>
         <option value="without">Without highlights</option>
+        <option value="checked">Highlights checked</option>
       </select>
 
       <div className="ml-auto flex items-center gap-2">
-        <span className="text-sm text-white/40">Sort</span>
+        <span className="text-sm text-[var(--text-muted)]">Sort</span>
         <select
           className={select}
           value={params.get("sort") ?? "date"}

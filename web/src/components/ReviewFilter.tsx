@@ -27,8 +27,8 @@ export function ReviewFilter({ active }: { active: string }) {
             onClick={() => select(t.label)}
             className={
               isActive
-                ? "rounded-lg bg-white/10 px-3 py-1.5 text-sm font-medium text-white"
-                : "rounded-lg px-3 py-1.5 text-sm text-white/60 hover:bg-white/5 hover:text-white"
+                ? "rounded-lg bg-[var(--surface-strong)] px-3 py-1.5 text-sm font-medium text-[var(--text)]"
+                : "rounded-lg px-3 py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--text)]"
             }
           >
             {t.short}
