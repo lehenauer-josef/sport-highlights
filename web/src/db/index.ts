@@ -7,7 +7,14 @@ const connectionString =
 
 // Reuse a single client across hot reloads in dev.
 const globalForDb = globalThis as unknown as { client?: ReturnType<typeof postgres> };
-const client = globalForDb.client ?? postgres(connectionString, { prepare: false });
+const client =
+  globalForDb.client ??
+  postgres(connectionString, {
+    prepare: false,
+    connection: {
+      search_path: "public",
+    },
+  });
 if (process.env.NODE_ENV !== "production") globalForDb.client = client;
 
 export const db = drizzle(client, { schema });
