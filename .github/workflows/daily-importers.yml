@@ -1,0 +1,86 @@
+name: Daily Sports Importers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "5 1 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-importers
+  cancel-in-progress: false
+
+jobs:
+  cfb:
+    name: Import CFB
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r importer/requirements.txt
+
+      - name: Run CFB importer
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python importer/import_games.py --include-future
+
+  nfl:
+    name: Import NFL
+    runs-on: ubuntu-latest
+    needs: cfb
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r importer/requirements.txt
+
+      - name: Run NFL importer
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python importer/import_nfl_games.py --include-future
+
+  nhl:
+    name: Import NHL
+    runs-on: ubuntu-latest
+    needs: nfl
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r importer/requirements.txt
+
+      - name: Run NHL importer
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python importer/import_nhl_games.py --include-future
