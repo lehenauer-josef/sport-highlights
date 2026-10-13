@@ -20,6 +20,7 @@ web/                      # Next.js app
   .env.example            # DATABASE_URL template
 importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
+  import_nhl_games.py     # NHL API -> Postgres (games + YouTube highlights)
   sync_airtable.py        # Airtable -> Postgres (teams + games)
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
@@ -165,6 +166,32 @@ python3 importer/sync_airtable.py                 # full sync
 python3 importer/sync_airtable.py --limit 50      # first N records (testing)
 python3 importer/sync_airtable.py --cfb-only      # only FBS/FCS games
 ```
+
+### C. Import NHL games + highlights (`import_nhl_games.py`)
+
+This importer mirrors the NHL N8N workflow. It pulls each NHL team's schedule
+from `api-web.nhle.com`, deduplicates games across teams, searches YouTube for
+the best highlight, and upserts the result into Postgres.
+
+Use the live `/now` endpoint by omitting `--season`, or import a historical
+season explicitly with an eight-digit season code such as `20232024`:
+
+```bash
+python3 importer/import_nhl_games.py
+python3 importer/import_nhl_games.py --season 20232024
+python3 importer/import_nhl_games.py --season 20222023 --dry-run
+```
+
+Common flags:
+
+| Flag                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `--season YYYYYYYY`  | Import a specific NHL season (e.g. `20232024`). Omit for `/now`.  |
+| `--include-future`   | Also import games that have not started yet.                       |
+| `--no-highlights`    | Skip the YouTube highlight search.                                 |
+| `--force-highlights` | Re-run the highlight search even for already-checked games.        |
+| `--limit N`          | Stop after importing N games (testing).                            |
+| `--dry-run`          | Fetch and score but do not write to Postgres.                      |
 
 ---
 
