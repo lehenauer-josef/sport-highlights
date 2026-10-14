@@ -35,7 +35,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
-        run: python importer/import_games.py --include-future
+        run: python importer/import_games.py --include-future season 2026 --week 7 --no-backfill   
 
   nfl:
     name: Import NFL
