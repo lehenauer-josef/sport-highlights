@@ -172,6 +172,13 @@ python3 importer/sync_airtable.py --cfb-only      # only FBS/FCS games
 This importer mirrors the NHL N8N workflow. It pulls each NHL team's schedule
 from `api-web.nhle.com`, deduplicates games across teams, searches YouTube for
 the best highlight, and upserts the result into Postgres.
+NHL does not provide numbered weeks, so the importer derives them as consecutive
+7-day blocks starting with the first regular-season game of each season. Running
+the importer again also fills in week numbers for existing NHL game records.
+The web app uses the same calculation for NHL records with no stored week, so
+existing data can be filtered without reimporting it. The Week dropdown selects
+one week or Postseason; All weeks removes the week restriction and preserves that
+choice rather than reapplying the default week.
 
 Use the live `/now` endpoint by omitting `--season`, or import a historical
 season explicitly with an eight-digit season code such as `20232024`:

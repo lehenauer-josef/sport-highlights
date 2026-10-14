@@ -22,6 +22,36 @@ export type SortField = "date" | "excitement" | "rank";
 export const homeTeam = alias(teams, "home_team");
 export const awayTeam = alias(teams, "away_team");
 
+const seasonGames = alias(games, "season_games");
+const seasonHomeTeam = alias(teams, "season_home_team");
+const seasonAwayTeam = alias(teams, "season_away_team");
+const nhlSeasonStart = db
+  .select({
+    date: sql`min((${seasonGames.gameDate} at time zone 'UTC')::date)`,
+  })
+  .from(seasonGames)
+  .leftJoin(seasonHomeTeam, eq(seasonGames.homeTeamId, seasonHomeTeam.id))
+  .leftJoin(seasonAwayTeam, eq(seasonGames.awayTeamId, seasonAwayTeam.id))
+  .where(
+    and(
+      eq(seasonGames.season, games.season),
+      eq(seasonGames.type, "regular"),
+      or(
+        eq(seasonHomeTeam.conferenceType, "NHL"),
+        eq(seasonAwayTeam.conferenceType, "NHL"),
+      ),
+    ),
+  );
+
+// Legacy NHL rows have no week; match the importer's UTC, seven-day season blocks.
+const gameWeek = sql<number | null>`coalesce(
+  ${games.week},
+  case when (${homeTeam.conferenceType} = 'NHL' or ${awayTeam.conferenceType} = 'NHL')
+    and ${games.type} in ('regular', 'postseason')
+  then ((${games.gameDate} at time zone 'UTC')::date - (${nhlSeasonStart})) / 7 + 1
+  end
+)`;
+
 // Flattened game shape the UI consumes (team attributes come from the join).
 export const gameColumns = {
   id: games.id,
@@ -29,7 +59,7 @@ export const gameColumns = {
   externalId: games.externalId,
   name: games.name,
   season: games.season,
-  week: games.week,
+  week: gameWeek,
   type: games.type,
   gameDate: games.gameDate,
   location: games.location,
@@ -175,7 +205,7 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
     const sportTypes = sportTypesKey.split("|").filter(Boolean);
     const cutoff = new Date().toISOString();
     const rows = await db
-      .select({ season: games.season, week: games.week })
+      .select({ season: games.season, week: gameWeek })
       .from(games)
       .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
       .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
@@ -246,7 +276,7 @@ function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
   const wantPostseason = f.weeks.includes("postseason");
   if (weekNums.length || wantPostseason) {
     const parts: SQL[] = [];
-    if (weekNums.length) parts.push(inArray(games.week, weekNums));
+    if (weekNums.length) parts.push(inArray(gameWeek, weekNums));
     if (wantPostseason) parts.push(eq(games.type, "postseason"));
     conditions.push(or(...parts)!);
   }
@@ -322,7 +352,7 @@ const cachedFetchGames = unstable_cache(
       hasMore: filters.page * PAGE_SIZE < total,
     };
   },
-  ["games-list"],
+  ["games-list-derived-weeks"],
   { revalidate: 60 },
 );
 
@@ -402,7 +432,7 @@ async function recentResults(
   const rows = await db
     .select({
       id: games.id,
-      week: games.week,
+      week: gameWeek,
       gameDate: games.gameDate,
       homeTeamId: games.homeTeamId,
       awayTeamId: games.awayTeamId,
@@ -510,7 +540,7 @@ const cachedFilterOptions = unstable_cache(
         .where(gameScope)
         .orderBy(desc(games.season)),
       db
-        .selectDistinct({ v: games.week })
+        .selectDistinct({ v: gameWeek })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))

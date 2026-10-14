@@ -461,7 +461,22 @@ def collect_games(team_codes: list[str], season: str | None):
     return list(merged.values())
 
 
-def build_row(game: dict, season_label: str, home_id: int | None, away_id: int | None, video_id: str | None, home_name: str | None, away_name: str | None):
+def nhl_week_number(game_date: datetime | None, season_start: datetime | None) -> int | None:
+    if game_date is None or season_start is None:
+        return None
+    return (game_date.date() - season_start.date()).days // 7 + 1
+
+
+def build_row(
+    game: dict,
+    season_label: str,
+    season_start: datetime | None,
+    home_id: int | None,
+    away_id: int | None,
+    video_id: str | None,
+    home_name: str | None,
+    away_name: str | None,
+):
     game_id = str(pick(game, "id"))
     game_date = parse_dt(pick(game, "startTimeUTC", "startTime"))
     period = pick(game, "periodDescriptor", default={})
@@ -473,7 +488,7 @@ def build_row(game: dict, season_label: str, home_id: int | None, away_id: int |
         "external_id": game_id,
         "name": f"{away_name} at {home_name}" if home_name and away_name else None,
         "season": normalize_nhl_season(season_label),
-        "week": None,
+        "week": nhl_week_number(game_date, season_start),
         "type": "regular" if game_type == 2 else "postseason",
         "game_date": game_date,
         "location": pick(pick(game, "venue", default={}), "default"),
@@ -561,6 +576,15 @@ def main() -> None:
                 str(pick(g, "id") or ""),
             )
         )
+        season_start = min(
+            (
+                game_date
+                for game in games
+                if to_int(pick(game, "gameType")) == 2
+                and (game_date := parse_dt(pick(game, "startTimeUTC", "startTime")))
+            ),
+            default=None,
+        )
 
         inserted = updated = skipped_future = highlights_found = 0
         no_highlight_examples = 0
@@ -642,6 +666,7 @@ def main() -> None:
             row = build_row(
                 game,
                 season_label,
+                season_start,
                 home_id,
                 away_id,
                 video_id,
@@ -666,6 +691,7 @@ def main() -> None:
                 sets = [
                     "name = %s",
                     "season = %s",
+                    "week = %s",
                     "type = %s",
                     "game_date = %s",
                     "location = %s",
@@ -679,6 +705,7 @@ def main() -> None:
                 vals = [
                     row["name"],
                     row["season"],
+                    row["week"],
                     row["type"],
                     row["game_date"],
                     row["location"],

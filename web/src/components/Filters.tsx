@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MultiSelect } from "@/components/MultiSelect";
 import { TeamSearch } from "@/components/TeamSearch";
 import type { FilterOptions } from "@/lib/games";
 
@@ -35,7 +34,7 @@ export function Filters({
 
   function update(key: string, value: string) {
     apply((next) => {
-      if (value) next.set(key, value);
+      if (value || key === "week") next.set(key, value);
       else next.delete(key);
     });
   }
@@ -51,7 +50,7 @@ export function Filters({
     "w-full rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--text-subtle)] sm:w-auto";
 
   const teams = splitList(params.get("team"));
-  const weeks = splitList(params.get("week"));
+  const week = splitList(params.get("week"))[0] ?? "";
   const activeCount = ["conference", "season", "week", "division", "highlights"]
     .filter((k) => params.get(k)).length;
 
@@ -108,13 +107,19 @@ export function Filters({
         ))}
       </select>
       {weekOptions.length ? (
-        <MultiSelect
-          label="Week"
-          options={weekOptions}
-          selected={weeks}
-          onChange={(v) => updateList("week", v)}
-          className="w-full sm:w-auto"
-        />
+        <select
+          aria-label="Week"
+          className={select}
+          value={week}
+          onChange={(e) => update("week", e.target.value)}
+        >
+          <option value="">All weeks</option>
+          {weekOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       ) : null}
       {showDivision ? (
         <select

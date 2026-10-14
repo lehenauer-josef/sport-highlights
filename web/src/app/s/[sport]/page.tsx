@@ -62,10 +62,10 @@ export default async function SportPage({
   }
 
   if (
-    !sp.season &&
-    !sp.week &&
-    !sp.sort &&
-    !sp.dir &&
+    sp.season == null &&
+    sp.week == null &&
+    sp.sort == null &&
+    sp.dir == null &&
     defaultRange.season &&
     defaultRange.week
   ) {
