@@ -888,6 +888,8 @@ def main() -> None:
                         help="Season type for --week (default: regular).")
     parser.add_argument("--no-backfill", action="store_true",
                         help="With --week, import only that week (disable regular-season 1..N backfill).")
+    parser.add_argument("--recent-weeks", type=int, default=None,
+                        help="Without --week, import only the N most recent started weeks.")
     parser.add_argument("--limit", type=int, default=None,
                         help="Stop after importing N games (testing).")
     parser.add_argument("--no-highlights", action="store_true",
@@ -912,6 +914,8 @@ def main() -> None:
             weeks = [(args.season_type, args.week)]
     else:
         weeks = fetch_weeks(key, args.season, now)
+        if args.recent_weeks:
+            weeks = weeks[-args.recent_weeks:]
     print(f"Season {args.season}: {len(weeks)} week(s) to import.", flush=True)
 
     inserted = updated = skipped_future = highlights_found = 0
