@@ -36,7 +36,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
-        run: python importer/import_games.py --include-future --recent-weeks 2
+        run: python importer/import_games.py --recent-weeks 2
 
   nfl:
     name: Import NFL
@@ -60,7 +60,7 @@ jobs:
       - name: Run NFL importer
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python importer/import_nfl_games.py --include-future
+        run: python importer/import_nfl_games.py
 
   nhl:
     name: Import NHL
@@ -84,4 +84,4 @@ jobs:
       - name: Run NHL importer
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python importer/import_nhl_games.py --include-future
+        run: python importer/import_nhl_games.py
