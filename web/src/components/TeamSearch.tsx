@@ -65,7 +65,7 @@ export function TeamSearch({
   const suggestions = items.filter((it) => !selected.includes(it.name));
 
   return (
-    <div ref={boxRef} className="relative min-w-56">
+    <div ref={boxRef} className="relative sm:min-w-56">
       <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-2 py-1 focus-within:border-[var(--text-subtle)]">
         {selected.map((t) => (
           <span
@@ -98,7 +98,7 @@ export function TeamSearch({
             }
           }}
           placeholder={selected.length ? "" : "Search teams…"}
-          className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+          className="min-w-24 flex-1 bg-transparent px-1 py-0.5 text-base text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] sm:text-sm"
         />
       </div>
 

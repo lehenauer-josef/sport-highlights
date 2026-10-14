@@ -10,11 +10,13 @@ export function MultiSelect({
   options,
   selected,
   onChange,
+  className = "",
 }: {
   label: string;
   options: Option[];
   selected: string[];
   onChange: (next: string[]) => void;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -41,11 +43,11 @@ export function MultiSelect({
     selected.length === 0 ? label : `${label}: ${selected.length}`;
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className={`relative ${className}`}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm outline-none focus:border-[var(--text-subtle)]"
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm outline-none focus:border-[var(--text-subtle)]"
       >
         <span className={selected.length ? "text-[var(--text)]" : "text-[var(--text-muted)]"}>
           {summary}

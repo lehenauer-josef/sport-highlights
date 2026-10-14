@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MultiSelect } from "@/components/MultiSelect";
 import { TeamSearch } from "@/components/TeamSearch";
@@ -23,6 +24,7 @@ export function Filters({
 }) {
   const router = useRouter();
   const params = useSearchParams();
+  const [open, setOpen] = useState(false);
 
   function apply(mutate: (next: URLSearchParams) => void) {
     const next = new URLSearchParams(params.toString());
@@ -46,10 +48,12 @@ export function Filters({
   }
 
   const select =
-    "rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--text-subtle)]";
+    "w-full rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--text-subtle)] sm:w-auto";
 
   const teams = splitList(params.get("team"));
   const weeks = splitList(params.get("week"));
+  const activeCount = ["conference", "season", "week", "division", "highlights"]
+    .filter((k) => params.get(k)).length;
 
   const weekOptions = [
     ...options.weeks.map((w) => ({ value: String(w), label: `Week ${w}` })),
@@ -59,12 +63,26 @@ export function Filters({
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <TeamSearch
-        selected={teams}
-        sportSlug={sportSlug}
-        onChange={(v) => updateList("team", v)}
-      />
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="flex items-start gap-2 sm:contents">
+        <div className="min-w-0 flex-1 sm:flex-none">
+          <TeamSearch
+            selected={teams}
+            sportSlug={sportSlug}
+            onChange={(v) => updateList("team", v)}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="shrink-0 rounded-lg border border-[var(--input-border)] bg-[var(--surface-soft)] px-3 py-2 text-sm text-[var(--text)] sm:hidden"
+        >
+          Filters{activeCount ? ` (${activeCount})` : ""} {open ? "▴" : "▾"}
+        </button>
+      </div>
+
+      <div className={`${open ? "grid" : "hidden"} grid-cols-2 gap-2 sm:contents`}>
       <select
         className={select}
         value={params.get("conference") ?? ""}
@@ -95,6 +113,7 @@ export function Filters({
           options={weekOptions}
           selected={weeks}
           onChange={(v) => updateList("week", v)}
+          className="w-full sm:w-auto"
         />
       ) : null}
       {showDivision ? (
@@ -120,7 +139,7 @@ export function Filters({
         <option value="checked">Highlights checked</option>
       </select>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="col-span-2 flex items-center gap-2 sm:ml-auto">
         <span className="text-sm text-[var(--text-muted)]">Sort</span>
         <select
           className={select}
@@ -139,6 +158,7 @@ export function Filters({
           <option value="desc">Desc</option>
           <option value="asc">Asc</option>
         </select>
+      </div>
       </div>
     </div>
   );
