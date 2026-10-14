@@ -8,11 +8,12 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // Canonical team data (name, logo, conference, division), synced from the
-// Airtable "Teams" table. Games reference these rows instead of duplicating
-// team attributes on every game.
+// Airtable "Teams" table; NBA teams come from ESPN via import_nba_games.py.
+// Games reference these rows instead of duplicating team attributes on every game.
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   airtableId: text("airtable_id").notNull().unique(),
@@ -34,6 +35,12 @@ export const teams = pgTable("teams", {
   teamsConferenceTypeIdx: index("teams_conference_type_idx").on(table.conferenceType),
   teamsConferenceIdx: index("teams_conference_idx").on(table.conference),
   teamsNameIdx: index("teams_name_idx").on(table.name),
+  // ESPN ids repeat across sports (12 is both the LA Clippers and Arizona), so a
+  // team is identified by sport + external id.
+  teamsConferenceTypeExternalIdKey: uniqueIndex("teams_conference_type_external_id_key").on(
+    table.conferenceType,
+    table.externalId,
+  ),
 }));
 
 export type Team = typeof teams.$inferSelect;

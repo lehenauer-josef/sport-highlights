@@ -61,12 +61,21 @@ CREATE TABLE IF NOT EXISTS teams (
 """
 
 # Add the downloaded-image columns on databases created before logo caching.
+# Teams are identified by sport + external id: ESPN ids repeat across sports
+# (12 is both the LA Clippers and Arizona).
 MIGRATE_TEAMS_SQL = """
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS logo_data TEXT;
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS logo_mime TEXT;
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS conference_logo_data TEXT;
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS conference_logo_mime TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS teams_conference_type_external_id_key
+    ON teams (conference_type, external_id);
 """
+
+# Leagues whose team data is owned by an ESPN importer (import_nba_games.py).
+# Airtable only adds missing teams for them and never overwrites existing rows;
+# its NBA records carry data of the college teams that share their ESPN ids.
+IMPORTER_OWNED_TEAM_TYPES = ("NBA",)
 
 CREATE_GAMES_SQL = """
 CREATE TABLE IF NOT EXISTS games (
@@ -134,7 +143,9 @@ INSERT INTO teams ({", ".join(TEAM_COLUMNS)})
 VALUES ({", ".join("%s" for _ in TEAM_COLUMNS)})
 ON CONFLICT (airtable_id) DO UPDATE SET
     {", ".join(f"{c} = EXCLUDED.{c}" for c in TEAM_COLUMNS if c != "airtable_id")},
-    synced_at = NOW();
+    synced_at = NOW()
+WHERE teams.conference_type IS NULL
+   OR teams.conference_type NOT IN ({", ".join(f"'{t}'" for t in IMPORTER_OWNED_TEAM_TYPES)});
 """
 
 # Game columns written by the importer (review_status is user-owned, left

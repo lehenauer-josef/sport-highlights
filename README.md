@@ -21,6 +21,7 @@ web/                      # Next.js app
 importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
   import_nhl_games.py     # NHL API -> Postgres (games + YouTube highlights)
+  import_nba_games.py     # ESPN NBA API -> Postgres (games + YouTube highlights)
   sync_airtable.py        # Airtable -> Postgres (teams + games)
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
@@ -199,6 +200,52 @@ Common flags:
 | `--force-highlights` | Re-run the highlight search even for already-checked games.        |
 | `--limit N`          | Stop after importing N games (testing).                            |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                      |
+
+### D. Import NBA games + highlights (`import_nba_games.py`)
+
+This importer mirrors the "NBA Game Highlights" / "NBA Highlight Search" N8N
+workflows. It fetches each game day from the ESPN NBA scoreboard API, skips
+preseason and All-Star games, searches YouTube for the best highlight (preferring
+a full-length "GameTime Highlights" upload naming both teams, and rejecting videos
+whose title names a different date or playoff game number), and upserts the
+result into Postgres keyed by the ESPN event id. Play-in and playoff games are
+stored as `postseason`.
+
+NBA seasons are identified by their end year (`2026` = 2025-26). The NBA has no
+numbered weeks, so the importer derives them as consecutive 7-day blocks (US
+Eastern dates) starting on the first day of the regular season; postseason games
+continue the numbering. Running the importer again also fills in week numbers for
+existing NBA game records, and the web app uses the same calculation for NBA
+records with no stored week, so existing data can be filtered by week without
+reimporting it.
+
+NBA and college teams share ESPN ids (e.g. `12` is both the LA Clippers and
+Arizona), so teams are identified by sport + id: `teams` has a unique key on
+`(conference_type, external_id)`. NBA team data is owned by this importer: on
+every run it syncs the NBA rows from ESPN's NBA team list (name, nickname,
+conference, color, logo), adds missing teams, and carries renames into the
+stored game names. `sync_airtable.py` no longer overwrites existing NBA teams,
+because the Airtable NBA records contain the data of the college teams with the
+same ids. College team rows are never modified.
+
+```bash
+python3 importer/import_nba_games.py                        # last 17 days (like the workflow)
+python3 importer/import_nba_games.py --days 3
+python3 importer/import_nba_games.py --season 2025-26
+python3 importer/import_nba_games.py --season 2026 --limit 10 --dry-run
+```
+
+Common flags:
+
+| Flag                 | Description                                                         |
+| -------------------- | ------------------------------------------------------------------- |
+| `--season SEASON`    | Import a whole season by end year (`2026`, `2025-26`).              |
+| `--days N`           | Without `--season`: days back from today to import (default: 17).   |
+| `--include-future`   | Also import games that have not finished yet.                       |
+| `--no-highlights`    | Skip the YouTube highlight search.                                  |
+| `--force-highlights` | Re-run the highlight search even for already-checked games.         |
+| `--limit N`          | Stop after importing N games (testing).                             |
+| `--dry-run`          | Fetch and score but do not write to Postgres.                       |
 
 ---
 

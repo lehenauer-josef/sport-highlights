@@ -25,30 +25,40 @@ export const awayTeam = alias(teams, "away_team");
 const seasonGames = alias(games, "season_games");
 const seasonHomeTeam = alias(teams, "season_home_team");
 const seasonAwayTeam = alias(teams, "season_away_team");
-const nhlSeasonStart = db
-  .select({
-    date: sql`min((${seasonGames.gameDate} at time zone 'UTC')::date)`,
-  })
-  .from(seasonGames)
-  .leftJoin(seasonHomeTeam, eq(seasonGames.homeTeamId, seasonHomeTeam.id))
-  .leftJoin(seasonAwayTeam, eq(seasonGames.awayTeamId, seasonAwayTeam.id))
-  .where(
-    and(
-      eq(seasonGames.season, games.season),
-      eq(seasonGames.type, "regular"),
-      or(
-        eq(seasonHomeTeam.conferenceType, "NHL"),
-        eq(seasonAwayTeam.conferenceType, "NHL"),
+// First regular-season game day of the row's season, in the league's calendar.
+function seasonStart(league: string, timeZone: string) {
+  return db
+    .select({
+      date: sql`min((${seasonGames.gameDate} at time zone ${sql.raw(`'${timeZone}'`)})::date)`,
+    })
+    .from(seasonGames)
+    .leftJoin(seasonHomeTeam, eq(seasonGames.homeTeamId, seasonHomeTeam.id))
+    .leftJoin(seasonAwayTeam, eq(seasonGames.awayTeamId, seasonAwayTeam.id))
+    .where(
+      and(
+        eq(seasonGames.season, games.season),
+        eq(seasonGames.type, "regular"),
+        or(
+          eq(seasonHomeTeam.conferenceType, league),
+          eq(seasonAwayTeam.conferenceType, league),
+        ),
       ),
-    ),
-  );
+    );
+}
 
-// Legacy NHL rows have no week; match the importer's UTC, seven-day season blocks.
+function derivedWeek(league: string, timeZone: string) {
+  const tz = sql.raw(`'${timeZone}'`);
+  return sql`when (${homeTeam.conferenceType} = ${league} or ${awayTeam.conferenceType} = ${league})
+    and ${games.type} in ('regular', 'postseason')
+  then ((${games.gameDate} at time zone ${tz})::date - (${seasonStart(league, timeZone)})) / 7 + 1`;
+}
+
+// Legacy NHL/NBA rows have no week; match the importers' seven-day season blocks
+// (NHL counts UTC dates, NBA counts US Eastern game days).
 const gameWeek = sql<number | null>`coalesce(
   ${games.week},
-  case when (${homeTeam.conferenceType} = 'NHL' or ${awayTeam.conferenceType} = 'NHL')
-    and ${games.type} in ('regular', 'postseason')
-  then ((${games.gameDate} at time zone 'UTC')::date - (${nhlSeasonStart})) / 7 + 1
+  case ${derivedWeek("NHL", "UTC")}
+    ${derivedWeek("NBA", "America/New_York")}
   end
 )`;
 
@@ -230,7 +240,7 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
       week: week == null ? null : String(week),
     };
   },
-  ["default-season-week"],
+  ["default-season-week-nba-weeks"],
   { revalidate: 900 },
 );
 
@@ -352,7 +362,7 @@ const cachedFetchGames = unstable_cache(
       hasMore: filters.page * PAGE_SIZE < total,
     };
   },
-  ["games-list-derived-weeks"],
+  ["games-list-derived-weeks-nba"],
   { revalidate: 60 },
 );
 
@@ -572,6 +582,6 @@ const cachedFilterOptions = unstable_cache(
       hasPostseason: (post[0]?.n ?? 0) > 0,
     };
   },
-  ["filter-options"],
+  ["filter-options-nba-weeks"],
   { revalidate: 1800 },
 );
