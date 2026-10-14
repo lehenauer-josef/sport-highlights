@@ -377,14 +377,16 @@ export function GameModal() {
         className="relative my-auto w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--input-border)] bg-[var(--surface-alt)] shadow-2xl shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Close"
-          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--chip-strong)] text-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--text)]"
-        >
-          ✕
-        </button>
+        <div className="flex justify-end border-b border-[var(--input-border)] bg-[var(--surface)]/80 px-3 py-3 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--chip-strong)] text-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--text)]"
+          >
+            ✕
+          </button>
+        </div>
 
         <div className="relative aspect-video bg-[var(--surface-alt)]">
           {videoId ? (
