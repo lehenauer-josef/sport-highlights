@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { games } from "@/db/schema";
 import { parseVideoId } from "@/lib/youtube";
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
       })
       .where(eq(games.id, id));
   }
+
+  revalidatePath("/review");
 
   return NextResponse.json({ ok: true });
 }

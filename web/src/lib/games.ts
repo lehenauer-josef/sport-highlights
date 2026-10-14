@@ -326,41 +326,6 @@ const cachedFetchGames = unstable_cache(
   { revalidate: 60 },
 );
 
-const cachedFetchReviewGames = unstable_cache(
-  async (payload: string): Promise<{ rows: GameView[]; total: number }> => {
-    const { filters, showAll, limit } = JSON.parse(payload) as {
-      filters: GameFilters;
-      showAll: boolean;
-      limit?: number;
-    };
-    if (!filters.sportLabel) return { rows: [], total: 0 };
-    const sportTypes = conferenceTypesForSport(filters.sportLabel);
-    const base = buildWhere(filters, sportTypes);
-    const where = showAll ? base : and(base, eq(games.highlightsChecked, false))!;
-
-    const [rows, countRes] = await Promise.all([
-      db
-        .select(gameColumns)
-        .from(games)
-        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-        .where(where)
-        .orderBy(buildOrderBy(filters))
-        .limit(limit ?? 120),
-      db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(games)
-        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-        .where(where),
-    ]);
-
-    return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
-  },
-  ["review-games"],
-  { revalidate: 60 },
-);
-
 export async function fetchGames(
   f: GameFilters,
 ): Promise<{ rows: GameView[]; total: number; hasMore: boolean }> {  if (!f.sportLabel) return { rows: [], total: 0, hasMore: false };
@@ -375,7 +340,30 @@ export async function fetchReviewGames(
   opts: { showAll: boolean; limit?: number },
 ): Promise<{ rows: GameView[]; total: number }> {
   if (!f.sportLabel) return { rows: [], total: 0 };
-  return cachedFetchReviewGames(JSON.stringify({ filters: f, showAll: opts.showAll, limit: opts.limit }));
+  const sportTypes = conferenceTypesForSport(f.sportLabel);
+  const base = buildWhere(f, sportTypes);
+  const where = opts.showAll
+    ? base
+    : and(base, eq(games.highlightsChecked, false))!;
+
+  const [rows, countRes] = await Promise.all([
+    db
+      .select(gameColumns)
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where)
+      .orderBy(buildOrderBy(f))
+      .limit(opts.limit ?? 120),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(where),
+  ]);
+
+  return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
 }
 
 export async function fetchGameById(id: number): Promise<GameView | null> {  const rows = await db
