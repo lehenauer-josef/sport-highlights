@@ -274,36 +274,97 @@ function buildOrderBy(f: GameFilters): SQL {
   return sql`${expr} ${dir} nulls last, ${games.id} desc`;
 }
 
+function serializeGameFilters(f: GameFilters, extra: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    sportLabel: f.sportLabel,
+    teams: [...f.teams].sort(),
+    season: f.season,
+    conference: f.conference,
+    division: f.division,
+    weeks: [...f.weeks].sort(),
+    highlights: f.highlights,
+    sort: f.sort,
+    dir: f.dir,
+    page: f.page,
+    ...extra,
+  });
+}
+
+const cachedFetchGames = unstable_cache(
+  async (payload: string): Promise<{ rows: GameView[]; total: number; hasMore: boolean }> => {
+    const { filters } = JSON.parse(payload) as { filters: GameFilters };
+    if (!filters.sportLabel) return { rows: [], total: 0, hasMore: false };
+    const sportTypes = conferenceTypesForSport(filters.sportLabel);
+    const where = buildWhere(filters, sportTypes);
+
+    const [rows, countRes] = await Promise.all([
+      db
+        .select(gameColumns)
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(where)
+        .orderBy(buildOrderBy(filters))
+        .limit(PAGE_SIZE)
+        .offset((filters.page - 1) * PAGE_SIZE),
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(where),
+    ]);
+
+    const total = countRes[0]?.n ?? 0;
+    return {
+      rows: rows as GameView[],
+      total,
+      hasMore: filters.page * PAGE_SIZE < total,
+    };
+  },
+  ["games-list"],
+  { revalidate: 60 },
+);
+
+const cachedFetchReviewGames = unstable_cache(
+  async (payload: string): Promise<{ rows: GameView[]; total: number }> => {
+    const { filters, showAll, limit } = JSON.parse(payload) as {
+      filters: GameFilters;
+      showAll: boolean;
+      limit?: number;
+    };
+    if (!filters.sportLabel) return { rows: [], total: 0 };
+    const sportTypes = conferenceTypesForSport(filters.sportLabel);
+    const base = buildWhere(filters, sportTypes);
+    const where = showAll ? base : and(base, eq(games.highlightsChecked, false))!;
+
+    const [rows, countRes] = await Promise.all([
+      db
+        .select(gameColumns)
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(where)
+        .orderBy(buildOrderBy(filters))
+        .limit(limit ?? 120),
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(where),
+    ]);
+
+    return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
+  },
+  ["review-games"],
+  { revalidate: 60 },
+);
+
 export async function fetchGames(
   f: GameFilters,
 ): Promise<{ rows: GameView[]; total: number; hasMore: boolean }> {  if (!f.sportLabel) return { rows: [], total: 0, hasMore: false };
-  const sportTypes = conferenceTypesForSport(f.sportLabel);
-  const where = buildWhere(f, sportTypes);
-
-  const [rows, countRes] = await Promise.all([
-    db
-      .select(gameColumns)
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(where)
-      .orderBy(buildOrderBy(f))
-      .limit(PAGE_SIZE)
-      .offset((f.page - 1) * PAGE_SIZE),
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(where),
-  ]);
-
-  const total = countRes[0]?.n ?? 0;
-  return {
-    rows: rows as GameView[],
-    total,
-    hasMore: f.page * PAGE_SIZE < total,
-  };
+  return cachedFetchGames(JSON.stringify({ filters: f }));
 }
 
 // Games shown on the review queue. By default only unchecked highlights
@@ -314,30 +375,7 @@ export async function fetchReviewGames(
   opts: { showAll: boolean; limit?: number },
 ): Promise<{ rows: GameView[]; total: number }> {
   if (!f.sportLabel) return { rows: [], total: 0 };
-  const sportTypes = conferenceTypesForSport(f.sportLabel);
-  const base = buildWhere(f, sportTypes);
-  const where = opts.showAll
-    ? base
-    : and(base, eq(games.highlightsChecked, false))!;
-
-  const [rows, countRes] = await Promise.all([
-    db
-      .select(gameColumns)
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(where)
-      .orderBy(buildOrderBy(f))
-      .limit(opts.limit ?? 120),
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(where),
-  ]);
-
-  return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
+  return cachedFetchReviewGames(JSON.stringify({ filters: f, showAll: opts.showAll, limit: opts.limit }));
 }
 
 export async function fetchGameById(id: number): Promise<GameView | null> {  const rows = await db

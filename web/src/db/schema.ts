@@ -1,6 +1,7 @@
 import {
   boolean,
   integer,
+  index,
   jsonb,
   numeric,
   pgTable,
@@ -29,7 +30,11 @@ export const teams = pgTable("teams", {
   conferenceLogoData: text("conference_logo_data"),
   conferenceLogoMime: text("conference_logo_mime"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  teamsConferenceTypeIdx: index("teams_conference_type_idx").on(table.conferenceType),
+  teamsConferenceIdx: index("teams_conference_idx").on(table.conference),
+  teamsNameIdx: index("teams_name_idx").on(table.name),
+}));
 
 export type Team = typeof teams.$inferSelect;
 
@@ -75,6 +80,15 @@ export const games = pgTable("games", {
 
   modified: timestamp("modified", { withTimezone: true }),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  gamesSeasonDateIdx: index("games_season_date_idx").on(table.season, table.gameDate),
+  gamesGameDateIdx: index("games_game_date_idx").on(table.gameDate),
+  gamesHomeTeamIdx: index("games_home_team_idx").on(table.homeTeamId),
+  gamesAwayTeamIdx: index("games_away_team_idx").on(table.awayTeamId),
+  gamesWeekIdx: index("games_week_idx").on(table.week),
+  gamesTypeIdx: index("games_type_idx").on(table.type),
+  gamesHighlightsCheckedIdx: index("games_highlights_checked_idx").on(table.highlightsChecked),
+  gamesVideoIdIdx: index("games_video_id_idx").on(table.videoId),
+}));
 
 export type Game = typeof games.$inferSelect;
