@@ -8,6 +8,7 @@ import {
   sql,
   type SQL,
 } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { games, teams } from "@/db/schema";
@@ -165,36 +166,43 @@ export function parseFilters(p: URLSearchParams): GameFilters {
 
 export async function loadDefaultSeasonAndWeek(
   sportTypes: string[],
-  now = new Date(),
 ): Promise<{ season: string | null; week: string | null }> {
-  const cutoff = now.toISOString();
-  const rows = await db
-    .selectDistinct({ season: games.season, week: games.week })
-    .from(games)
-    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-    .where(
-      and(
-        or(
-          inArray(homeTeam.conferenceType, sportTypes),
-          inArray(awayTeam.conferenceType, sportTypes),
-        )!,
-        sql`${games.gameDate} is not null`,
-        sql`${games.gameDate} <= ${cutoff}`,
-      ),
-    )
-    .orderBy(desc(games.season), desc(games.week));
-
-  if (!rows.length) return { season: null, week: null };
-
-  const season = rows[0]?.season ?? null;
-  const week = rows.find((r) => r.season === season)?.week ?? null;
-
-  return {
-    season: season ?? null,
-    week: week == null ? null : String(week),
-  };
+  return cachedDefaultSeasonAndWeek(sportTypes.join("|"));
 }
+
+const cachedDefaultSeasonAndWeek = unstable_cache(
+  async (sportTypesKey: string): Promise<{ season: string | null; week: string | null }> => {
+    const sportTypes = sportTypesKey.split("|").filter(Boolean);
+    const cutoff = new Date().toISOString();
+    const rows = await db
+      .select({ season: games.season, week: games.week })
+      .from(games)
+      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+      .where(
+        and(
+          or(
+            inArray(homeTeam.conferenceType, sportTypes),
+            inArray(awayTeam.conferenceType, sportTypes),
+          )!,
+          sql`${games.gameDate} is not null`,
+          sql`${games.gameDate} <= ${cutoff}`,
+        ),
+      )
+      .orderBy(desc(games.gameDate), desc(games.id))
+      .limit(1);
+
+    const season = rows[0]?.season ?? null;
+    const week = rows[0]?.week ?? null;
+
+    return {
+      season,
+      week: week == null ? null : String(week),
+    };
+  },
+  ["default-season-week"],
+  { revalidate: 900 },
+);
 
 function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
   const conditions: SQL[] = [
@@ -456,49 +464,58 @@ export type FilterOptions = {
 export async function loadFilterOptions(
   sportTypes: string[],
 ): Promise<FilterOptions> {
-  const gameScope = or(
-    inArray(homeTeam.conferenceType, sportTypes),
-    inArray(awayTeam.conferenceType, sportTypes),
-  );
-
-  const [seasons, weeks, confs, post] = await Promise.all([
-    db
-      .selectDistinct({ v: games.season })
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(gameScope)
-      .orderBy(desc(games.season)),
-    db
-      .selectDistinct({ v: games.week })
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(gameScope),
-    db
-      .selectDistinct({ v: teams.conference })
-      .from(teams)
-      .where(inArray(teams.conferenceType, sportTypes)),
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(games)
-      .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
-      .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-      .where(and(gameScope, eq(games.type, "postseason"))),
-  ]);
-
-  return {
-    seasons: seasons
-      .map((r) => r.v)
-      .filter((v): v is string => Boolean(v)),
-    conferences: confs
-      .map((r) => r.v)
-      .filter((v): v is string => Boolean(v))
-      .sort(),
-    weeks: weeks
-      .map((r) => r.v)
-      .filter((v): v is number => v != null)
-      .sort((a, b) => a - b),
-    hasPostseason: (post[0]?.n ?? 0) > 0,
-  };
+  return cachedFilterOptions(sportTypes.join("|"));
 }
+
+const cachedFilterOptions = unstable_cache(
+  async (sportTypesKey: string): Promise<FilterOptions> => {
+    const sportTypes = sportTypesKey.split("|").filter(Boolean);
+    const gameScope = or(
+      inArray(homeTeam.conferenceType, sportTypes),
+      inArray(awayTeam.conferenceType, sportTypes),
+    );
+
+    const [seasons, weeks, confs, post] = await Promise.all([
+      db
+        .selectDistinct({ v: games.season })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(gameScope)
+        .orderBy(desc(games.season)),
+      db
+        .selectDistinct({ v: games.week })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(gameScope),
+      db
+        .selectDistinct({ v: teams.conference })
+        .from(teams)
+        .where(inArray(teams.conferenceType, sportTypes)),
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(and(gameScope, eq(games.type, "postseason"))),
+    ]);
+
+    return {
+      seasons: seasons
+        .map((r) => r.v)
+        .filter((v): v is string => Boolean(v)),
+      conferences: confs
+        .map((r) => r.v)
+        .filter((v): v is string => Boolean(v))
+        .sort(),
+      weeks: weeks
+        .map((r) => r.v)
+        .filter((v): v is number => v != null)
+        .sort((a, b) => a - b),
+      hasPostseason: (post[0]?.n ?? 0) > 0,
+    };
+  },
+  ["filter-options"],
+  { revalidate: 1800 },
+);
