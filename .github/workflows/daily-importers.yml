@@ -3,7 +3,8 @@ name: Daily Sports Importers
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5 1 * * *"
+    # 04:00 UTC = 06:00 CEST (05:00 CET in winter)
+    - cron: "0 4 * * *"
 
 permissions:
   contents: read
