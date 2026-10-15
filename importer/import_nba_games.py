@@ -19,7 +19,7 @@ The NBA has no numbered weeks, so the importer derives them as consecutive
 
 Usage:
     pip install -r requirements.txt
-    export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+    export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
     python import_nba_games.py
     python import_nba_games.py --days 3
     python import_nba_games.py --season 2026
@@ -45,7 +45,6 @@ import psycopg
 
 import highlight_scorer as scorer
 
-DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nba-highlights-importer/1.0"
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 ESPN_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
@@ -711,7 +710,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db_url = os.environ.get("DATABASE_URL", DEFAULT_DB_URL)
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise SystemExit("DATABASE_URL is not set. Export the Postgres (Neon) connection string first.")
     now = datetime.now(timezone.utc)
     today = local_date(now)
     season = parse_season(args.season)

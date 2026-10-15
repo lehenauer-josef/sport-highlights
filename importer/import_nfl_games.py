@@ -17,7 +17,7 @@ reviewed (`highlights_checked = true`), the highlight choice is left alone unles
 
 Usage:
     pip install -r requirements.txt
-    export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+    export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
     python import_nfl_games.py --season 2026
     python import_nfl_games.py --season 2026 --week 3
     python import_nfl_games.py --season 2026 --limit 10
@@ -53,7 +53,6 @@ STAT_COLUMNS = (
     "home_line_scores", "away_line_scores",
     "home_team_stats", "away_team_stats", "game_leaders",
 )
-DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nfl-highlights-importer/1.0"
 YT_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -687,7 +686,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db_url = os.environ.get("DATABASE_URL", DEFAULT_DB_URL)
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise SystemExit("DATABASE_URL is not set. Export the Postgres (Neon) connection string first.")
     now = datetime.now(timezone.utc)
 
     rows = fetch_games_csv()

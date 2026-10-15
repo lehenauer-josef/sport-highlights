@@ -5,10 +5,7 @@ import * as schema from "./schema";
 const connectionString =
   process.env.DATABASE_URL ??
   process.env.POSTGRES_URL ??
-  process.env.POSTGRES_PRISMA_URL ??
-  (process.env.NODE_ENV === "production"
-    ? undefined
-    : "postgres://cfb:cfb@localhost:5433/highlights");
+  process.env.POSTGRES_PRISMA_URL;
 
 if (!connectionString) {
   throw new Error(

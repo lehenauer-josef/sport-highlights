@@ -14,7 +14,7 @@ If `--season` is omitted, the importer uses the live `/now` endpoint.
 
 Usage:
     pip install -r requirements.txt
-    export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+    export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
     python import_nhl_games.py
     python import_nhl_games.py --season 20232024
     python import_nhl_games.py --season 20222023 --limit 10
@@ -39,7 +39,6 @@ import psycopg
 
 import highlight_scorer as scorer
 
-DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nhl-highlights-importer/1.0"
 GAME_STORY_URL = "https://api-web.nhle.com/v1/wsc/game-story/{game_id}"
 STAT_COLUMNS = ("home_team_stats", "away_team_stats", "game_leaders")
@@ -724,7 +723,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db_url = os.environ.get("DATABASE_URL", DEFAULT_DB_URL)
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise SystemExit("DATABASE_URL is not set. Export the Postgres (Neon) connection string first.")
     now = datetime.now(timezone.utc)
 
     use_now_endpoint = args.season in (None, "", "now", "current")

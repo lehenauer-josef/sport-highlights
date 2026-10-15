@@ -6,14 +6,14 @@ and find the best YouTube highlight video for each game.
 
 ## Stack
 
-- **Web**: Next.js 15 (App Router), React 19, Tailwind CSS 4, Drizzle ORM.
-- **Database**: PostgreSQL 16 (Docker), exposed on host port **5433**.
+- **Web**: Next.js 15 (App Router), React 19, Tailwind CSS 4, Drizzle ORM; deployed on Vercel.
+- **Database**: hosted PostgreSQL on [Neon](https://neon.tech). Production, the
+  daily importers (GitHub Actions) and local development all use this database.
 - **Importers**: Python 3.9+ scripts in `importer/`.
 
 ## Project layout
 
 ```
-docker-compose.yml        # Postgres 16 (container cfb_highlights_db)
 web/                      # Next.js app
   src/app/                # routes (review UI, per-sport tabs, API routes)
   src/db/schema.ts        # Drizzle schema
@@ -27,78 +27,65 @@ importer/
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
 db/
-  highlights.sql.gz.part-*  # database snapshot (see "Restore from the bundled dump")
-  migrations/               # SQL migrations for existing databases
+  migrations/             # SQL migrations already applied to the Neon database
+.github/workflows/        # daily importer run (04:00 UTC)
 ```
 
 ## Prerequisites
 
-- Docker (for Postgres)
-- Node.js 18+ and npm
+- Node.js 20.12+ and npm
 - Python 3.9+
+- The Neon connection string (`DATABASE_URL`)
 - A [College Football Data API](https://collegefootballdata.com/key) key (for `import_games.py`)
 
 ---
 
-## 1. Start the database
+## 1. Configure the database connection
+
+Everything connects through the `DATABASE_URL` environment variable; there is no
+local database or default connection. Copy the template and paste the Neon
+connection string:
 
 ```bash
-docker compose up -d
+cp web/.env.example web/.env.local
 ```
 
-This starts Postgres on `localhost:5433` (user `cfb`, password `cfb`, database
-`highlights`). Data persists in the `cfb_db_data` volume.
-
-### Restore from the bundled dump (fastest way to get data)
-
-A compressed snapshot of the database is stored as split parts
-(`db/highlights.sql.gz.part-*`, each under 50 MB). Restore it instead of
-re-running all the importers:
+Keep the value in quotes: the Neon URL contains `&`, which breaks unquoted shell
+sourcing. To use it in a shell (for the importers or `psql`):
 
 ```bash
-docker compose up -d                                   # start Postgres first
-cat db/highlights.sql.gz.part-* | gunzip | docker exec -i cfb_highlights_db psql -U cfb -d highlights
-docker exec -i cfb_highlights_db psql -U cfb -d highlights < db/migrations/0001_rename_airtable_id_to_source_id.sql
-npm --prefix web run db:push                           # add any columns newer than the snapshot
+export DATABASE_URL="$(grep '^DATABASE_URL=' web/.env.local | cut -d= -f2- | tr -d '"')"
 ```
 
-This loads all teams and games (including logos and highlight picks). The
-snapshot predates the `airtable_id` → `source_id` rename, so run the migration
-right after restoring it. Teams are maintained in the database (only the NBA
-importer creates or updates teams), so the snapshot is also the source of the
-college football, NFL and NHL teams. To refresh the snapshot after new imports,
-regenerate the parts with:
+The GitHub Actions importers read it from the `DATABASE_URL` repository secret,
+and Vercel from its project environment variables.
+
+Teams are maintained in the database: only the NBA importer creates or updates
+teams; college football, NFL and NHL teams already exist in Neon.
+
+### Schema changes
+
+`web/src/db/schema.ts` is the source of truth. Apply changes with:
 
 ```bash
-docker exec cfb_highlights_db pg_dump -U cfb -d highlights --no-owner --no-privileges | gzip > db/highlights.sql.gz
-split -b 45m db/highlights.sql.gz db/highlights.sql.gz.part- && rm db/highlights.sql.gz
+npm --prefix web run db:push
 ```
 
-If you restore from the dump you can skip the importer steps below.
-
-### Migrations for existing databases
-
-Apply the SQL files in `db/migrations/` in order to databases created before the
-change (they are safe to re-run):
-
-```bash
-psql "$DATABASE_URL" -f db/migrations/0001_rename_airtable_id_to_source_id.sql
-```
-
-`0001` renames the legacy `airtable_id` key column of `teams` and `games` to
+Renames need a hand-written SQL migration instead (see `db/migrations/`), so
+`db:push` does not drop and recreate a column. Apply migrations with
+`psql "$DATABASE_URL" -f db/migrations/<file>.sql`. `0001` (already applied)
+renamed the legacy `airtable_id` key column of `teams` and `games` to
 `source_id` (the unique import key, e.g. `nfl:2024_15_BAL_NYG`).
 
 ## 2. Start the web application
 
 ```bash
 # from the repo root
-cp web/.env.example web/.env        # first time only
 npm --prefix web install            # first time only
 npm --prefix web run dev
 ```
 
-The app reads `DATABASE_URL` from `web/.env`
-(`postgres://cfb:cfb@localhost:5433/highlights`). By default Next.js serves on
+The app reads `DATABASE_URL` from `web/.env.local`. By default Next.js serves on
 <http://localhost:3000> (it will pick the next free port, e.g. 3001, if 3000 is
 in use).
 
@@ -106,12 +93,6 @@ Sport pages and the review queue offer team, season, week, highlights, and sorti
 controls, plus division/ranking filters for college football. Conference filtering
 is not available in the UI; legacy `conference` URL parameters are ignored on
 these pages. Conference details remain visible on games.
-
-Apply the schema to a fresh database with:
-
-```bash
-npm --prefix web run db:push
-```
 
 > **Note:** never run `next build` while `next dev` is running — they share
 > `web/.next` and it can corrupt the dev build. If that happens, stop dev and run
@@ -121,8 +102,8 @@ npm --prefix web run db:push
 
 ## 3. Import data
 
-All importers connect via the `DATABASE_URL` environment variable (defaults to the
-docker-compose connection string if unset). Install dependencies once:
+All importers connect via the `DATABASE_URL` environment variable and exit with
+an error if it is not set (see step 1). Install dependencies once:
 
 ```bash
 pip install -r importer/requirements.txt
@@ -140,7 +121,6 @@ Provide your CFD API key via the `CFBD_API_KEY` environment variable **or** a
 
 ```bash
 export CFBD_API_KEY=your_key_here
-export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
 ```
 
 Import a single week (recommended for a first run):
@@ -172,7 +152,7 @@ Notes:
 - Games are keyed on the CFD game id; re-running updates in place.
 - A game already marked as human-reviewed is never overwritten by the search.
 - Teams are read-only: the importer only resolves existing teams, it never
-  creates or modifies them. They come with the database snapshot.
+  creates or modifies them.
 
 ### B. Import NHL games + highlights (`import_nhl_games.py`)
 
@@ -300,18 +280,16 @@ appear; no database migration or ESPN API key is required.
 ## Typical first-time setup
 
 ```bash
-docker compose up -d                              # 1. database
-cat db/highlights.sql.gz.part-* | gunzip | docker exec -i cfb_highlights_db psql -U cfb -d highlights
-docker exec -i cfb_highlights_db psql -U cfb -d highlights < db/migrations/0001_rename_airtable_id_to_source_id.sql
-cp web/.env.example web/.env                      # 2. web env
-npm --prefix web install && npm --prefix web run db:push
-export CFBD_API_KEY=your_key_here                 # 3. import games + highlights
-python3 importer/import_games.py --season 2022 --week 4
-npm --prefix web run dev                          # 4. run the app
+cp web/.env.example web/.env.local                # 1. paste the Neon DATABASE_URL
+npm --prefix web install                          # 2. web dependencies
+npm --prefix web run dev                          # 3. run the app
+pip install -r importer/requirements.txt          # 4. (optional) run an importer
+export DATABASE_URL="$(grep '^DATABASE_URL=' web/.env.local | cut -d= -f2- | tr -d '"')"
+python3 importer/import_nfl_games.py --season 2024 --week 15 --no-highlights
 ```
 
 ## Database access
 
 ```bash
-docker exec cfb_highlights_db psql -U cfb -d highlights
+psql "$DATABASE_URL"
 ```

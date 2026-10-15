@@ -15,7 +15,7 @@ Highlights are ranked by the shared scorer in `highlight_scorer.py`.
 Usage:
     pip install -r requirements.txt
     export CFBD_API_KEY=...        # or create importer/.cfbd_key / .cfbd_key
-    export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
+    export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
     python import_games.py --season 2026            # all started weeks
     python import_games.py --season 2026 --week 3   # a single week
     python import_games.py --season 2026 --limit 10 # cap games (testing)
@@ -42,7 +42,6 @@ import highlight_scorer as scorer
 
 CFBD_BASE = "https://api.collegefootballdata.com"
 USER_AGENT = "cfb-highlights-importer/1.0"
-DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 
 # Browser-like UA so YouTube serves the real results markup.
 YT_UA = (
@@ -897,7 +896,9 @@ def main() -> None:
     args = parser.parse_args()
 
     key = get_cfbd_key()
-    db_url = os.environ.get("DATABASE_URL", DEFAULT_DB_URL)
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise SystemExit("DATABASE_URL is not set. Export the Postgres (Neon) connection string first.")
     now = datetime.now(timezone.utc)
 
     if args.week is not None:
