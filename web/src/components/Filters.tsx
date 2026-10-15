@@ -29,6 +29,7 @@ export function Filters({
     const next = new URLSearchParams(params.toString());
     mutate(next);
     next.delete("page");
+    next.delete("conference");
     router.push(`?${next.toString()}`);
   }
 
@@ -51,7 +52,7 @@ export function Filters({
 
   const teams = splitList(params.get("team"));
   const week = splitList(params.get("week"))[0] ?? "";
-  const activeCount = ["conference", "season", "week", "division", "highlights"]
+  const activeCount = ["season", "week", "division", "highlights"]
     .filter((k) => params.get(k)).length;
 
   const weekOptions = [
@@ -82,18 +83,6 @@ export function Filters({
       </div>
 
       <div className={`${open ? "grid" : "hidden"} grid-cols-2 gap-2 sm:contents`}>
-      <select
-        className={select}
-        value={params.get("conference") ?? ""}
-        onChange={(e) => update("conference", e.target.value)}
-      >
-        <option value="">All conferences</option>
-        {options.conferences.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
       <select
         className={select}
         value={params.get("season") ?? ""}

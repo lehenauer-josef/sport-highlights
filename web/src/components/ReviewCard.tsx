@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatDateTime, youtubeThumb, youtubeUrl } from "@/lib/format";
+import { youtubeThumb, youtubeUrl } from "@/lib/format";
+import { LocalDateTime } from "@/components/LocalDateTime";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
 
@@ -90,8 +91,8 @@ export function ReviewCard({ game }: { game: GameView }) {
         </h3>
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {shortSportLabel(game.conferenceType)} · {game.season}
-          {game.week ? ` · Wk ${game.week}` : ""} ·{" "}
-          {formatDateTime(game.gameDate)}
+          {game.week ? ` · Wk ${game.week}` : ""}
+          <LocalDateTime date={game.gameDate} prefix=" · " />
         </span>
       </div>
 

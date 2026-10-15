@@ -1,7 +1,8 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { formatDateTime, logoSrc, youtubeThumb, youtubeUrl } from "@/lib/format";
+import { logoSrc, youtubeThumb, youtubeUrl } from "@/lib/format";
+import { LocalDateTime } from "@/components/LocalDateTime";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
 import { FormHover } from "@/components/TeamForm";
@@ -138,7 +139,7 @@ export function HighlightCard({ game }: { game: GameView }) {
           <span>
             {game.season ? `${game.season}` : ""}
             {game.week ? ` · Wk ${game.week}` : ""}
-            {game.gameDate ? ` · ${formatDateTime(game.gameDate)}` : ""}
+            <LocalDateTime date={game.gameDate} prefix=" · " />
           </span>
           {game.excitementIndex != null ? (
             <span title="Excitement Index">

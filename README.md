@@ -84,6 +84,11 @@ The app reads `DATABASE_URL` from `web/.env`
 <http://localhost:3000> (it will pick the next free port, e.g. 3001, if 3000 is
 in use).
 
+Sport pages and the review queue offer team, season, week, highlights, and sorting
+controls, plus division/ranking filters for college football. Conference filtering
+is not available in the UI; legacy `conference` URL parameters are ignored on
+these pages. Conference details remain visible on games.
+
 Apply the schema to a fresh database with:
 
 ```bash

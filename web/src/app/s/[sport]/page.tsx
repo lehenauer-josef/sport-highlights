@@ -21,7 +21,7 @@ function toParams(
 ): URLSearchParams {
   const u = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) {
-    if (v == null) continue;
+    if (v == null || k === "conference") continue;
     u.set(k, Array.isArray(v) ? (v[0] ?? "") : v);
   }
   u.set("sport", sportSlug);

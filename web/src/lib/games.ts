@@ -521,12 +521,11 @@ export async function fetchTeamForm(gameId: number): Promise<TeamForm> {
 
 export type FilterOptions = {
   seasons: string[];
-  conferences: string[];
   weeks: number[];
   hasPostseason: boolean;
 };
 
-// Season/conference/week choices limited to the current sport.
+// Season/week choices limited to the current sport.
 export async function loadFilterOptions(
   sportTypes: string[],
 ): Promise<FilterOptions> {
@@ -541,7 +540,7 @@ const cachedFilterOptions = unstable_cache(
       inArray(awayTeam.conferenceType, sportTypes),
     );
 
-    const [seasons, weeks, confs, post] = await Promise.all([
+    const [seasons, weeks, post] = await Promise.all([
       db
         .selectDistinct({ v: games.season })
         .from(games)
@@ -556,10 +555,6 @@ const cachedFilterOptions = unstable_cache(
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
         .where(gameScope),
       db
-        .selectDistinct({ v: teams.conference })
-        .from(teams)
-        .where(inArray(teams.conferenceType, sportTypes)),
-      db
         .select({ n: sql<number>`count(*)::int` })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
@@ -571,10 +566,6 @@ const cachedFilterOptions = unstable_cache(
       seasons: seasons
         .map((r) => r.v)
         .filter((v): v is string => Boolean(v)),
-      conferences: confs
-        .map((r) => r.v)
-        .filter((v): v is string => Boolean(v))
-        .sort(),
       weeks: weeks
         .map((r) => r.v)
         .filter((v): v is number => v != null)
