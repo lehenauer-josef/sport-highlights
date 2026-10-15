@@ -5,6 +5,8 @@
   on sport + ESPN team id, since ESPN ids are shared with college teams),
 - fetches each game day from the ESPN scoreboard API,
 - skips preseason games,
+- fetches each completed game's ESPN summary (quarter scores, team stats and
+  per-team stat leaders),
 - searches YouTube for the best highlight video (preferring a full-length
   "GameTime Highlights" upload that names both teams),
 - and upserts the result into `games` (keyed by the ESPN event id).
@@ -24,12 +26,14 @@ Usage:
     python import_nba_games.py --days 3
     python import_nba_games.py --season 2026
     python import_nba_games.py --season 2025-26 --limit 10 --dry-run
+    python import_nba_games.py --season 2026 --stats-only
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import json
+import math
 import os
 import random
 import re
@@ -49,6 +53,11 @@ USER_AGENT = "nba-highlights-importer/1.0"
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 ESPN_TEAMS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
 ESPN_GROUPS_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/groups"
+ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
+STAT_COLUMNS = (
+    "home_line_scores", "away_line_scores",
+    "home_team_stats", "away_team_stats", "game_leaders",
+)
 ESPN_SEASON_TYPE_URL = (
     "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/{season}/types/{type}"
 )
@@ -203,6 +212,153 @@ def competitor(event: dict, side: str) -> dict:
     # ESPN lists competitors home first, away second.
     idx = 0 if side == "home" else 1
     return competitors[idx] if len(competitors) > idx else {}
+
+
+def stat_number(value) -> int | float | None:
+    try:
+        number = float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def made_attempted(value) -> tuple[int, int] | None:
+    parts = str(value or "").split("-")
+    if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+        return int(parts[0]), int(parts[1])
+    return None
+
+
+# Team box score stat -> stored key.
+TEAM_STAT_KEYS = {
+    "totalRebounds": "rebounds",
+    "offensiveRebounds": "offensiveRebounds",
+    "assists": "assists",
+    "steals": "steals",
+    "blocks": "blocks",
+    "totalTurnovers": "turnovers",
+    "pointsInPaint": "pointsInPaint",
+    "fastBreakPoints": "fastBreakPoints",
+    "fouls": "fouls",
+    "largestLead": "largestLead",
+}
+# Shooting splits ("38-89") -> (made key, attempted key, pct key, ESPN pct stat).
+SHOOTING_KEYS = {
+    "fieldGoalsMade-fieldGoalsAttempted": (
+        "fieldGoalsMade", "fieldGoalsAttempted", "fieldGoalPct", "fieldGoalPct",
+    ),
+    "threePointFieldGoalsMade-threePointFieldGoalsAttempted": (
+        "threePointMade", "threePointAttempted", "threePointPct", "threePointFieldGoalPct",
+    ),
+    "freeThrowsMade-freeThrowsAttempted": (
+        "freeThrowsMade", "freeThrowsAttempted", "freeThrowPct", "freeThrowPct",
+    ),
+}
+# Player box score leader categories: (stored key, ESPN key, detail labels).
+LEADER_SPECS = (
+    ("points", "points", ["FG", "3PT", "FT"]),
+    ("rebounds", "rebounds", ["OREB", "DREB"]),
+    ("assists", "assists", ["TO", "MIN"]),
+    ("steals", "steals", ["MIN"]),
+    ("blocks", "blocks", ["MIN"]),
+)
+
+
+def normalize_espn_stats(summary: dict) -> dict:
+    """Map ESPN's NBA game summary into the shared line score/team stat/leader columns."""
+    result = dict.fromkeys(STAT_COLUMNS)
+    competitions = pick(pick(summary, "header", default={}), "competitions", default=[]) or []
+    if not competitions:
+        return result
+
+    sides = {}
+    for comp in pick(competitions[0], "competitors", default=[]) or []:
+        side = comp.get("homeAway")
+        if side not in ("home", "away") or comp.get("id") is None:
+            continue
+        sides[str(comp["id"])] = side
+        scores = [
+            to_int(pick(period, "displayValue", "value"))
+            for period in comp.get("linescores") or []
+        ]
+        if scores and all(score is not None for score in scores):
+            result[f"{side}_line_scores"] = scores
+
+    boxscore = pick(summary, "boxscore", default={}) or {}
+    team_stats = {"home": {}, "away": {}}
+    for team in boxscore.get("teams") or []:
+        side = sides.get(str(pick(team.get("team") or {}, "id")))
+        if side is None:
+            continue
+        raw = {stat.get("name"): stat.get("displayValue") for stat in team.get("statistics") or []}
+        for name, key in TEAM_STAT_KEYS.items():
+            value = stat_number(raw.get(name))
+            if value is not None:
+                team_stats[side][key] = value
+        for name, (made_key, att_key, pct_key, espn_pct) in SHOOTING_KEYS.items():
+            split = made_attempted(raw.get(name))
+            if split:
+                team_stats[side][made_key], team_stats[side][att_key] = split
+            # ESPN rounds percentages to whole numbers; recompute with one decimal.
+            pct = round(split[0] / split[1] * 100, 1) if split and split[1] else stat_number(raw.get(espn_pct))
+            if pct is not None:
+                team_stats[side][pct_key] = pct
+
+    leaders = {"home": {}, "away": {}}
+    for team in boxscore.get("players") or []:
+        side = sides.get(str(pick(team.get("team") or {}, "id")))
+        if side is None:
+            continue
+        for category in team.get("statistics") or []:
+            keys = category.get("keys") or []
+            labels = category.get("labels") or []
+            for target, primary, details in LEADER_SPECS:
+                if primary not in keys:
+                    continue
+                index = keys.index(primary)
+                best, best_value = None, 0
+                for entry in category.get("athletes") or []:
+                    values = entry.get("stats") or []
+                    value = stat_number(values[index]) if index < len(values) else None
+                    if value is not None and value > best_value:
+                        best, best_value = entry, value
+                if best is None:
+                    continue
+                athlete = best.get("athlete") or {}
+                detail_values = dict(zip(labels, best.get("stats") or []))
+                leaders[side][target] = {
+                    "id": str(athlete.get("id") or ""),
+                    "name": athlete.get("displayName") or athlete.get("shortName") or "",
+                    "stat": best_value,
+                    "statType": labels[index] if index < len(labels) else primary,
+                    "detail": " · ".join(
+                        f"{label} {detail_values[label]}" for label in details
+                        if detail_values.get(label) not in (None, "", "--", "—")
+                    ),
+                }
+
+    for side in ("home", "away"):
+        if team_stats[side]:
+            result[f"{side}_team_stats"] = json.dumps(team_stats[side])
+    if leaders["home"] or leaders["away"]:
+        result["game_leaders"] = json.dumps(leaders)
+    return result
+
+
+def fetch_game_stats(event_id: str) -> dict:
+    try:
+        summary = fetch_json(f"{ESPN_SUMMARY_URL}?event={event_id}")
+        if not isinstance(summary, dict):
+            raise ValueError("empty response")
+        stats = normalize_espn_stats(summary)
+        if not any(value is not None for value in stats.values()):
+            raise ValueError("no box score or statistics in ESPN response")
+        return stats
+    except (SystemExit, ValueError, KeyError, TypeError, AttributeError) as exc:
+        print(f"    stats unavailable for {event_id}: {exc}", flush=True)
+        return dict.fromkeys(STAT_COLUMNS)
 
 
 def youtube_query(event: dict, away: str | None, home: str | None, game_date: datetime | None) -> str:
@@ -664,12 +820,13 @@ def build_row(
         "reason": None,
         "review_status": "pending",
         "modified": None,
+        **dict.fromkeys(STAT_COLUMNS),
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import NBA games and highlights from the ESPN API into Postgres.",
+        description="Import NBA games, ESPN stats, and YouTube highlights into Postgres.",
     )
     parser.add_argument(
         "--season",
@@ -702,6 +859,11 @@ def main() -> None:
         "--force-highlights",
         action="store_true",
         help="Re-run the highlight search even for games that already have a reviewed highlight.",
+    )
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="Backfill ESPN stats for existing games without changing highlights or other game data.",
     )
     parser.add_argument(
         "--dry-run",
@@ -737,13 +899,15 @@ def main() -> None:
     highlights_found = no_highlight_examples = 0
 
     with psycopg.connect(db_url) as conn:
-        synced = sync_nba_teams(conn, dry_run=args.dry_run)
-        if synced:
-            print(f"Synced {synced} NBA team(s) from ESPN.", flush=True)
-        by_ext = load_team_map(conn)
-        print(f"Loaded {len(by_ext)} NBA teams from Postgres.", flush=True)
-        if not by_ext:
-            raise SystemExit("No NBA teams found in the teams table (conference_type = 'NBA').")
+        by_ext: dict[str, int] = {}
+        if not args.stats_only:
+            synced = sync_nba_teams(conn, dry_run=args.dry_run)
+            if synced:
+                print(f"Synced {synced} NBA team(s) from ESPN.", flush=True)
+            by_ext = load_team_map(conn)
+            print(f"Loaded {len(by_ext)} NBA teams from Postgres.", flush=True)
+            if not by_ext:
+                raise SystemExit("No NBA teams found in the teams table (conference_type = 'NBA').")
 
         for event in events:
             event_id = str(event["id"])
@@ -759,6 +923,30 @@ def main() -> None:
             is_future = (game_date and game_date > now) or not completed
             if is_future and not args.include_future:
                 skipped_future += 1
+                continue
+
+            if args.stats_only:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id FROM games WHERE external_id = %s OR source_id = %s ORDER BY id LIMIT 1",
+                        (event_id, f"nba:{event_id}"),
+                    )
+                    existing = cur.fetchone()
+                    if existing is None:
+                        continue
+                    stats = fetch_game_stats(event_id) if completed else dict.fromkeys(STAT_COLUMNS)
+                    if not args.dry_run:
+                        cur.execute(
+                            "UPDATE games SET "
+                            + ", ".join(f"{column} = COALESCE(%s, {column})" for column in STAT_COLUMNS)
+                            + " WHERE id = %s",
+                            [stats[column] for column in STAT_COLUMNS] + [existing[0]],
+                        )
+                updated += 1
+                if not args.dry_run and updated % 20 == 0:
+                    conn.commit()
+                if args.limit and updated >= args.limit:
+                    break
                 continue
 
             home, away = competitor(event, "home"), competitor(event, "away")
@@ -819,6 +1007,8 @@ def main() -> None:
                             )
 
             row = build_row(event, home_id, away_id, home_name, away_name, video_id)
+            if completed:
+                row.update(fetch_game_stats(event_id))
 
             if args.dry_run:
                 inserted += 0 if existing else 1
@@ -836,6 +1026,11 @@ def main() -> None:
                     "home_points = %s",
                     "away_points = %s",
                     "overtime = %s",
+                    "home_line_scores = COALESCE(%s, home_line_scores)",
+                    "away_line_scores = COALESCE(%s, away_line_scores)",
+                    "home_team_stats = COALESCE(%s, home_team_stats)",
+                    "away_team_stats = COALESCE(%s, away_team_stats)",
+                    "game_leaders = COALESCE(%s, game_leaders)",
                     "synced_at = NOW()",
                 ]
                 vals = [
@@ -850,6 +1045,7 @@ def main() -> None:
                     row["home_points"],
                     row["away_points"],
                     row["overtime"],
+                    *(row[column] for column in STAT_COLUMNS),
                 ]
                 # Keep the existing video when the search comes up empty.
                 if found:
@@ -872,14 +1068,17 @@ def main() -> None:
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
-                            modified
+                            modified, home_line_scores, away_line_scores, home_team_stats,
+                            away_team_stats, game_leaders
                         ) VALUES (
                             %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
                             %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,
-                            %(review_status)s, %(modified)s
+                            %(review_status)s, %(modified)s, %(home_line_scores)s,
+                            %(away_line_scores)s, %(home_team_stats)s, %(away_team_stats)s,
+                            %(game_leaders)s
                         )
                         """,
                         row,

@@ -27,7 +27,7 @@ function TeamRow({
   lineScores,
   showPoints,
   form,
-  footballGame,
+  quarterScores,
 }: {
   name: string | null;
   rank: number | null;
@@ -39,9 +39,9 @@ function TeamRow({
   lineScores: number[] | null;
   showPoints: boolean;
   form: FormResult[] | null;
-  footballGame: boolean;
+  quarterScores: boolean;
 }) {
-  const hasLineScores = footballGame && Array.isArray(lineScores) && lineScores.length > 0;
+  const hasLineScores = quarterScores && Array.isArray(lineScores) && lineScores.length > 0;
   const scoreLabels = ["1", "2", "3", "4"];
   if (hasLineScores && lineScores.length > 4) scoreLabels.push("OT");
   scoreLabels.push("T");
@@ -161,6 +161,24 @@ const NHL_STATS: TeamStatDef[] = [
   { key: "blockedShots", label: "Blocked" },
   { key: "giveaways", label: "Giveaways" },
   { key: "takeaways", label: "Takeaways" },
+];
+
+const pct = (v: number) => `${v.toFixed(1)}%`;
+
+const NBA_STATS: TeamStatDef[] = [
+  { key: "fieldGoalPct", label: "FG %", format: pct },
+  { key: "threePointPct", label: "3PT %", format: pct },
+  { key: "freeThrowPct", label: "FT %", format: pct },
+  { key: "rebounds", label: "Rebounds" },
+  { key: "offensiveRebounds", label: "Off Rebounds" },
+  { key: "assists", label: "Assists" },
+  { key: "steals", label: "Steals" },
+  { key: "blocks", label: "Blocks" },
+  { key: "turnovers", label: "Turnovers" },
+  { key: "pointsInPaint", label: "Pts in Paint" },
+  { key: "fastBreakPoints", label: "Fast Break Pts" },
+  { key: "fouls", label: "Fouls" },
+  { key: "largestLead", label: "Largest Lead" },
 ];
 
 function TeamStatChart({
@@ -379,6 +397,7 @@ export function GameModal() {
   const videoId = game?.videoId ?? null;
   const isNflGame = game?.conferenceType === "NFL";
   const isFootballGame = isNflGame || game?.conferenceType === "FBS" || game?.conferenceType === "FCS";
+  const isNbaGame = game?.conferenceType === "NBA";
   const story = game?.conferenceType === "NHL" ? nhlStory(game) : null;
   const meta: { label: string; value: string }[] = [];
   if (game) {
@@ -510,7 +529,7 @@ export function GameModal() {
                 lineScores={game.awayLineScores}
                 showPoints={showResults}
                 form={form?.away ?? null}
-                footballGame={isFootballGame}
+                quarterScores={isFootballGame || isNbaGame}
               />
               <div className="text-center text-[11px] uppercase tracking-widest text-[var(--text-subtle)]">
                 at
@@ -530,7 +549,7 @@ export function GameModal() {
                 lineScores={game.homeLineScores}
                 showPoints={showResults}
                 form={form?.home ?? null}
-                footballGame={isFootballGame}
+                quarterScores={isFootballGame || isNbaGame}
               />
             </div>
 
@@ -540,15 +559,16 @@ export function GameModal() {
               </div>
             ) : null}
 
-            {isFootballGame ? (
+            {isFootballGame || isNbaGame ? (
               <TeamStatChart
                 game={game}
+                statDefs={isNbaGame ? NBA_STATS : FOOTBALL_STATS}
                 collapsed={teamStatsCollapsed}
                 onToggle={() => setTeamStatsCollapsed((v) => !v)}
               />
             ) : null}
 
-            {isFootballGame ? (
+            {isFootballGame || isNbaGame ? (
               <GameLeaders
                 game={game}
                 collapsed={gameLeadersCollapsed}

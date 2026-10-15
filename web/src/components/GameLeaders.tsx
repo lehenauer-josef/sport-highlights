@@ -23,12 +23,22 @@ const CATEGORY_LABELS: Record<string, string> = {
   tackles: "Tackles",
   sacks: "Sacks",
   interceptions: "Interceptions",
+  points: "Points",
+  rebounds: "Rebounds",
+  assists: "Assists",
+  steals: "Steals",
+  blocks: "Blocks",
 };
 
-function playerImageSrc(playerId: string, nfl: boolean): string | null {
+const HEADSHOT_SPORT: Record<string, string> = {
+  NFL: "nfl",
+  NBA: "nba",
+};
+
+function playerImageSrc(playerId: string, conferenceType: string | null | undefined): string | null {
   const id = String(playerId || "").trim();
   if (!id) return null;
-  const sport = nfl ? "nfl" : "college-football";
+  const sport = HEADSHOT_SPORT[conferenceType ?? ""] ?? "college-football";
   return `https://a.espncdn.com/combiner/i?img=/i/headshots/${sport}/players/full/${id}.png&h=144&w=144&scale=crop&transparent=true`;
 }
 
@@ -64,6 +74,11 @@ export function GameLeaders({
     "tackles",
     "sacks",
     "interceptions",
+    "points",
+    "rebounds",
+    "assists",
+    "steals",
+    "blocks",
   ];
   const sortedCategories = Array.from(categories).sort(
     (a, b) => categoryOrder.indexOf(a) - categoryOrder.indexOf(b),
@@ -133,8 +148,8 @@ export function GameLeaders({
             const homeLeader = (leaders.home || {})[category];
             const awayLeader = (leaders.away || {})[category];
             const categoryLabel = CATEGORY_LABELS[category] || category;
-            const homeHeadshot = homeLeader ? playerImageSrc(homeLeader.id, game.conferenceType === "NFL") : null;
-            const awayHeadshot = awayLeader ? playerImageSrc(awayLeader.id, game.conferenceType === "NFL") : null;
+            const homeHeadshot = homeLeader ? playerImageSrc(homeLeader.id, game.conferenceType) : null;
+            const awayHeadshot = awayLeader ? playerImageSrc(awayLeader.id, game.conferenceType) : null;
 
             return (
               <div

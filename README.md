@@ -21,7 +21,7 @@ web/                      # Next.js app
 importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
   import_nhl_games.py     # NHL API -> Postgres (games, stats + YouTube highlights)
-  import_nba_games.py     # ESPN NBA API -> Postgres (teams, games + YouTube highlights)
+  import_nba_games.py     # ESPN NBA API -> Postgres (teams, games, stats + highlights)
   import_nfl_games.py     # nflverse + ESPN -> Postgres (games, stats + highlights)
   highlight_scorer.py     # shared YouTube highlight scorer (used by all importers)
   requirements.txt        # psycopg
@@ -207,7 +207,7 @@ Common flags:
 | `--limit N`          | Stop after importing N games (testing).                            |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                      |
 
-### C. Import NBA games + highlights (`import_nba_games.py`)
+### C. Import NBA games, stats + highlights (`import_nba_games.py`)
 
 This importer fetches each game day from the ESPN NBA scoreboard API, skips
 preseason and All-Star games, searches YouTube for the best highlight (preferring
@@ -236,7 +236,26 @@ python3 importer/import_nba_games.py                        # last 17 days
 python3 importer/import_nba_games.py --days 3
 python3 importer/import_nba_games.py --season 2025-26
 python3 importer/import_nba_games.py --season 2026 --limit 10 --dry-run
+# Backfill game stats only, preserving all existing game metadata/highlight reviews:
+python3 importer/import_nba_games.py --stats-only
+python3 importer/import_nba_games.py --season 2025-26 --stats-only
 ```
+
+For every completed game the importer also fetches ESPN's NBA game summary
+(`/apis/site/v2/sports/basketball/nba/summary?event={id}`) and stores it for the
+game modal, using the same layout as football:
+
+- **Quarter scores**: 1-4 plus OT (all overtime periods summed), hidden while
+  "Show result" is off.
+- **Team Stats**: FG%, 3PT%, FT%, rebounds, offensive rebounds, assists, steals,
+  blocks, turnovers, points in the paint, fast break points, fouls and largest lead.
+- **Game Leaders**: per-team points, rebounds, assists, steals and blocks leaders
+  with NBA player headshots.
+
+Line scores go into `home_line_scores`/`away_line_scores`, team stats into
+`home_team_stats`/`away_team_stats` and leaders into `game_leaders` (no schema
+change needed). An unavailable summary is logged and never erases previously
+imported stats.
 
 Common flags:
 
@@ -247,6 +266,7 @@ Common flags:
 | `--include-future`   | Also import games that have not finished yet.                       |
 | `--no-highlights`    | Skip the YouTube highlight search.                                  |
 | `--force-highlights` | Re-run the highlight search even for already-checked games.         |
+| `--stats-only`       | Only backfill game stats for existing games (no highlight search).  |
 | `--limit N`          | Stop after importing N games (testing).                             |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                       |
 
