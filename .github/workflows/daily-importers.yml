@@ -3,8 +3,9 @@ name: Daily Sports Importers
 on:
   workflow_dispatch:
   schedule:
-    # 04:00 UTC = 06:00 CEST (05:00 CET in winter)
-    - cron: "0 4 * * *"
+    # 04:17 UTC = 06:17 CEST (05:17 CET in winter). GitHub delays scheduled runs
+    # most at the top of the hour, so this deliberately uses an odd minute.
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read

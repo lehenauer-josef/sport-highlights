@@ -28,7 +28,7 @@ importer/
   .cfbd_key               # (optional) CFD API key file
 db/
   migrations/             # SQL migrations already applied to the Neon database
-.github/workflows/        # daily importer run (04:00 UTC)
+.github/workflows/        # daily importer run (04:17 UTC)
 ```
 
 ## Prerequisites
