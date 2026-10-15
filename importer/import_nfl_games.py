@@ -4,6 +4,7 @@
 This is the Python equivalent of the two N8N workflows attached in the task:
 
 - the main workflow fetches NFL games from nflverse/games.csv,
+- fetches quarter scores, team stats, and game leaders using the CSV's ESPN id,
 - resolves NFL teams from the local `teams` table,
 - builds the YouTube search URL,
 - scrapes the search results page,
@@ -23,12 +24,14 @@ Usage:
     python import_nfl_games.py --season 2026 --week 3
     python import_nfl_games.py --season 2026 --limit 10
     python import_nfl_games.py --season 2026 --dry-run
+    python import_nfl_games.py --season 2024 --week 15 --stats-only
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import math
 import os
 import random
 import re
@@ -48,6 +51,11 @@ import n8n_find_highlight as scorer  # noqa: E402
 
 NFLVERSE_GAMES_URL = (
     "https://raw.githubusercontent.com/nflverse/nfldata/refs/heads/master/data/games.csv"
+)
+ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary"
+STAT_COLUMNS = (
+    "home_line_scores", "away_line_scores",
+    "home_team_stats", "away_team_stats", "game_leaders",
 )
 DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nfl-highlights-importer/1.0"
@@ -162,6 +170,132 @@ def fetch_games_csv() -> list[dict]:
         return []
     reader = csv.DictReader(StringIO(text))
     return [row for row in reader]
+
+
+def stat_number(value) -> int | float | None:
+    try:
+        number = float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def normalize_espn_stats(summary: dict) -> dict:
+    """Map ESPN's home/away teams into the shared college-football stat shape."""
+    result = dict.fromkeys(STAT_COLUMNS)
+    competitions = (summary.get("header") or {}).get("competitions") or []
+    if not competitions:
+        return result
+
+    sides = {}
+    for competitor in competitions[0].get("competitors") or []:
+        side = competitor.get("homeAway")
+        if side not in ("home", "away"):
+            continue
+        sides[str(competitor["id"])] = side
+        scores = [
+            to_int(period.get("displayValue", period.get("value")))
+            for period in competitor.get("linescores") or []
+        ]
+        if scores and all(score is not None for score in scores):
+            result[f"{side}_line_scores"] = scores
+
+    boxscore = summary.get("boxscore") or {}
+    team_stats = {"home": {}, "away": {}}
+    stat_keys = {
+        "netPassingYards": "passingYards",
+        "rushingYards": "rushingYards",
+        "totalYards": "totalYards",
+        "interceptions": "interceptions",
+        "fumblesLost": "fumbles",
+    }
+    for team in boxscore.get("teams") or []:
+        side = sides.get(str(team.get("team", {}).get("id")))
+        if side is None:
+            continue
+        for stat in team.get("statistics") or []:
+            key = stat_keys.get(stat.get("name"))
+            value = stat_number(stat.get("displayValue"))
+            if key and value is not None:
+                team_stats[side][key] = value
+
+    specs = {
+        "passing": [("passingYards", "passingYards", ["C/ATT", "TD", "INT"])],
+        "rushing": [("rushingYards", "rushingYards", ["CAR", "TD"])],
+        "receiving": [("receivingYards", "receivingYards", ["REC", "TD"])],
+        "defensive": [
+            ("tackles", "totalTackles", ["SOLO"]),
+            ("sacks", "sacks", []),
+        ],
+        "interceptions": [("interceptions", "interceptions", ["YDS", "TD"])],
+    }
+    leaders = {"home": {}, "away": {}}
+    for team in boxscore.get("players") or []:
+        side = sides.get(str(team.get("team", {}).get("id")))
+        if side is None:
+            continue
+        for category in team.get("statistics") or []:
+            keys = category.get("keys") or []
+            labels = category.get("labels") or []
+            totals = dict(zip(keys, category.get("totals") or []))
+            if category.get("name") == "defensive":
+                for source, target in (("totalTackles", "tackles"), ("sacks", "sacks")):
+                    value = stat_number(totals.get(source))
+                    if value is not None:
+                        team_stats[side][target] = value
+            for target, primary, details in specs.get(category.get("name"), []):
+                if primary not in keys:
+                    continue
+                index = keys.index(primary)
+                best = None
+                best_value = 0
+                for entry in category.get("athletes") or []:
+                    values = entry.get("stats") or []
+                    value = stat_number(values[index]) if index < len(values) else None
+                    if value is not None and value > best_value:
+                        best, best_value = entry, value
+                if best is None:
+                    continue
+                athlete = best.get("athlete") or {}
+                detail_values = dict(zip(labels, best.get("stats") or []))
+                leaders[side][target] = {
+                    "id": str(athlete.get("id") or ""),
+                    "name": athlete.get("displayName") or athlete.get("shortName") or "",
+                    "stat": best_value,
+                    "statType": labels[index] if index < len(labels) else primary,
+                    "detail": " · ".join(
+                        f"{label} {detail_values[label]}" for label in details
+                        if detail_values.get(label) not in (None, "", "--", "—")
+                    ),
+                }
+
+    for side in ("home", "away"):
+        if team_stats[side]:
+            result[f"{side}_team_stats"] = json.dumps(team_stats[side])
+    if leaders["home"] or leaders["away"]:
+        result["game_leaders"] = json.dumps(leaders)
+    return result
+
+
+def fetch_game_stats(game: dict) -> dict:
+    espn_id = to_int(game.get("espn"))
+    game_id = pick(game, "game_id", "id", "gameId")
+    if not espn_id:
+        print(f"    stats unavailable for {game_id}: no ESPN id", flush=True)
+        return dict.fromkeys(STAT_COLUMNS)
+    try:
+        text = fetch_url_text(f"{ESPN_SUMMARY_URL}?event={espn_id}")
+        if not text:
+            raise ValueError("empty response")
+        stats = normalize_espn_stats(json.loads(text))
+        if not any(value is not None for value in stats.values()):
+            raise ValueError("no box score or statistics in ESPN response")
+        return stats
+    except (SystemExit, ValueError, KeyError, TypeError) as exc:
+        print(f"    stats unavailable for {game_id} (ESPN {espn_id}): {exc}", flush=True)
+        return dict.fromkeys(STAT_COLUMNS)
 
 
 def normalize_name(value: str | None) -> str | None:
@@ -510,7 +644,7 @@ def apply_pregame_records(conn, season: int) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import NFL games and highlights from nflverse + YouTube into Postgres.",
+        description="Import NFL games, ESPN stats, and YouTube highlights into Postgres.",
     )
     parser.add_argument(
         "--season",
@@ -544,6 +678,11 @@ def main() -> None:
         "--force-highlights",
         action="store_true",
         help="Re-run the highlight search even for games that already have a reviewed highlight.",
+    )
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="Backfill ESPN stats for existing games without changing highlights or other game data.",
     )
     parser.add_argument(
         "--dry-run",
@@ -601,6 +740,30 @@ def main() -> None:
             home_mascot = mascot_by_id.get(home_id)
             away_mascot = mascot_by_id.get(away_id)
 
+            if args.stats_only:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id FROM games WHERE external_id = %s",
+                        (str(pick(game, "game_id", "id", "gameId")),),
+                    )
+                    existing = cur.fetchone()
+                    if existing is None:
+                        continue
+                    stats = fetch_game_stats(game) if completed else dict.fromkeys(STAT_COLUMNS)
+                    if not args.dry_run:
+                        cur.execute(
+                            "UPDATE games SET "
+                            + ", ".join(f"{column} = COALESCE(%s, {column})" for column in STAT_COLUMNS)
+                            + " WHERE id = %s",
+                            [stats[column] for column in STAT_COLUMNS] + [existing[0]],
+                        )
+                updated += 1
+                if not args.dry_run:
+                    conn.commit()
+                if args.limit and updated >= args.limit:
+                    break
+                continue
+
             existing = None
             with conn.cursor() as cur:
                 cur.execute(
@@ -644,6 +807,8 @@ def main() -> None:
                     )
 
             row = game_row(game, home_id, away_id, video_id, home_display, away_display)
+            if completed:
+                row.update(fetch_game_stats(game))
 
             # These extra values are only meaningful when we actually searched.
             if do_search or not existing:
@@ -668,11 +833,11 @@ def main() -> None:
                     "away_team_id = %s",
                     "home_points = %s",
                     "away_points = %s",
-                    "home_line_scores = %s",
-                    "away_line_scores = %s",
-                    "home_team_stats = %s",
-                    "away_team_stats = %s",
-                    "game_leaders = %s",
+                    "home_line_scores = COALESCE(%s, home_line_scores)",
+                    "away_line_scores = COALESCE(%s, away_line_scores)",
+                    "home_team_stats = COALESCE(%s, home_team_stats)",
+                    "away_team_stats = COALESCE(%s, away_team_stats)",
+                    "game_leaders = COALESCE(%s, game_leaders)",
                     "home_rank = %s",
                     "away_rank = %s",
                     "home_record = %s",
@@ -753,7 +918,7 @@ def main() -> None:
         if not args.dry_run:
             conn.commit()
 
-        if not args.dry_run:
+        if not args.dry_run and not args.stats_only:
             records_updated = apply_pregame_records(conn, args.season)
             if records_updated:
                 print(f"Updated pregame records for {records_updated} games.", flush=True)

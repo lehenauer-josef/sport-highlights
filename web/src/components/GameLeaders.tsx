@@ -25,10 +25,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   interceptions: "Interceptions",
 };
 
-function playerImageSrc(playerId: string): string | null {
+function playerImageSrc(playerId: string, nfl: boolean): string | null {
   const id = String(playerId || "").trim();
   if (!id) return null;
-  return `https://a.espncdn.com/combiner/i?img=/i/headshots/college-football/players/full/${id}.png&h=144&w=144&scale=crop&transparent=true`;
+  const sport = nfl ? "nfl" : "college-football";
+  return `https://a.espncdn.com/combiner/i?img=/i/headshots/${sport}/players/full/${id}.png&h=144&w=144&scale=crop&transparent=true`;
 }
 
 export function GameLeaders({
@@ -132,8 +133,8 @@ export function GameLeaders({
             const homeLeader = (leaders.home || {})[category];
             const awayLeader = (leaders.away || {})[category];
             const categoryLabel = CATEGORY_LABELS[category] || category;
-            const homeHeadshot = homeLeader ? playerImageSrc(homeLeader.id) : null;
-            const awayHeadshot = awayLeader ? playerImageSrc(awayLeader.id) : null;
+            const homeHeadshot = homeLeader ? playerImageSrc(homeLeader.id, game.conferenceType === "NFL") : null;
+            const awayHeadshot = awayLeader ? playerImageSrc(awayLeader.id, game.conferenceType === "NFL") : null;
 
             return (
               <div

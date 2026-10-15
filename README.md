@@ -22,6 +22,7 @@ importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
   import_nhl_games.py     # NHL API -> Postgres (games + YouTube highlights)
   import_nba_games.py     # ESPN NBA API -> Postgres (games + YouTube highlights)
+  import_nfl_games.py     # nflverse + ESPN -> Postgres (games, stats + highlights)
   sync_airtable.py        # Airtable -> Postgres (teams + games)
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
@@ -251,6 +252,31 @@ Common flags:
 | `--force-highlights` | Re-run the highlight search even for already-checked games.         |
 | `--limit N`          | Stop after importing N games (testing).                             |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                       |
+
+---
+
+### E. Import NFL games, stats + highlights (`import_nfl_games.py`)
+
+NFL schedules and final scores come from nflverse's games CSV. For completed
+games, the importer uses the CSV's `espn` event ID to fetch ESPN's NFL summary:
+quarter/overtime scores, team stats, and per-team game leaders (passing, rushing,
+receiving, tackles, sacks, and interceptions). These use the same detail layout
+as college football, with NFL player headshots. "Show result" controls the quarter
+scores and final score, just as it does for college games.
+
+```bash
+python3 importer/import_nfl_games.py --season 2024 --week 15 --no-highlights
+# Backfill stats only, preserving all existing game metadata/highlight reviews:
+python3 importer/import_nfl_games.py --season 2024 --week 15 --stats-only
+python3 importer/import_nfl_games.py --season 2024 --stats-only
+```
+
+The NFL importer also accepts `--limit`, `--dry-run`, `--include-future`,
+`--no-highlights`, and `--force-highlights`. `--stats-only` updates existing games
+only and never searches for highlights. A missing ESPN ID, unavailable summary,
+or missing stat is logged (where the whole summary is unavailable) and does not
+erase previously imported stats. Older seasons need a backfill before stats
+appear; no database migration or ESPN API key is required.
 
 ---
 

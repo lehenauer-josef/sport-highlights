@@ -26,7 +26,7 @@ function TeamRow({
   lineScores,
   showPoints,
   form,
-  collegeGame,
+  footballGame,
 }: {
   name: string | null;
   rank: number | null;
@@ -38,15 +38,15 @@ function TeamRow({
   lineScores: number[] | null;
   showPoints: boolean;
   form: FormResult[] | null;
-  collegeGame: boolean;
+  footballGame: boolean;
 }) {
-  const hasLineScores = collegeGame && Array.isArray(lineScores) && lineScores.length > 0;
+  const hasLineScores = footballGame && Array.isArray(lineScores) && lineScores.length > 0;
   const scoreLabels = ["1", "2", "3", "4"];
   if (hasLineScores && lineScores.length > 4) scoreLabels.push("OT");
   scoreLabels.push("T");
 
   const scoreCells = hasLineScores
-    ? [...lineScores.slice(0, 4), ...(lineScores.length > 4 ? [lineScores[4]] : []), points ?? lineScores.reduce((sum, n) => sum + n, 0)]
+    ? [...lineScores.slice(0, 4), ...(lineScores.length > 4 ? [lineScores.slice(4).reduce((sum, n) => sum + n, 0)] : []), points ?? lineScores.reduce((sum, n) => sum + n, 0)]
     : [];
 
   const scoreGrid = hasLineScores && (lineScores?.length ?? 0) > 4 ? "grid-cols-6" : "grid-cols-5";
@@ -345,6 +345,7 @@ export function GameModal() {
 
   const videoId = game?.videoId ?? null;
   const isNflGame = game?.conferenceType === "NFL";
+  const isFootballGame = isNflGame || game?.conferenceType === "FBS" || game?.conferenceType === "FCS";
   const meta: { label: string; value: string }[] = [];
   if (game) {
     if (game.season) meta.push({ label: "Season", value: game.season });
@@ -475,7 +476,7 @@ export function GameModal() {
                 lineScores={game.awayLineScores}
                 showPoints={showResults}
                 form={form?.away ?? null}
-                collegeGame={game.conferenceType === "FBS" || game.conferenceType === "FCS"}
+                footballGame={isFootballGame}
               />
               <div className="text-center text-[11px] uppercase tracking-widest text-[var(--text-subtle)]">
                 at
@@ -495,7 +496,7 @@ export function GameModal() {
                 lineScores={game.homeLineScores}
                 showPoints={showResults}
                 form={form?.home ?? null}
-                collegeGame={game.conferenceType === "FBS" || game.conferenceType === "FCS"}
+                footballGame={isFootballGame}
               />
             </div>
 
@@ -505,7 +506,7 @@ export function GameModal() {
               </div>
             ) : null}
 
-            {(game.conferenceType === "FBS" || game.conferenceType === "FCS") ? (
+            {isFootballGame ? (
               <TeamStatChart
                 game={game}
                 collapsed={teamStatsCollapsed}
@@ -513,7 +514,7 @@ export function GameModal() {
               />
             ) : null}
 
-            {(game.conferenceType === "FBS" || game.conferenceType === "FCS") ? (
+            {isFootballGame ? (
               <GameLeaders
                 game={game}
                 collapsed={gameLeadersCollapsed}
