@@ -8,6 +8,7 @@ This script mirrors the attached N8N workflows in a standalone Python importer:
 - deduplicates games across teams,
 - skips preseason games,
 - searches YouTube for the best highlight video,
+- fetches each completed game's story (goals, three stars, team stats),
 - and upserts the result into `games`.
 
 Use `--season` to import a historical season such as `20232024` or `20222023`.
@@ -21,6 +22,7 @@ Usage:
     python import_nhl_games.py --season 20232024
     python import_nhl_games.py --season 20222023 --limit 10
     python import_nhl_games.py --season 20232024 --dry-run
+    python import_nhl_games.py --season 20232024 --stats-only
 """
 from __future__ import annotations
 
@@ -44,6 +46,8 @@ import n8n_find_highlight as scorer  # noqa: E402
 
 DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nhl-highlights-importer/1.0"
+GAME_STORY_URL = "https://api-web.nhle.com/v1/wsc/game-story/{game_id}"
+STAT_COLUMNS = ("home_team_stats", "away_team_stats", "game_leaders")
 
 YT_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -461,6 +465,182 @@ def collect_games(team_codes: list[str], season: str | None):
     return list(merged.values())
 
 
+def _text(value):
+    if isinstance(value, dict):
+        value = value.get("default")
+    return str(value).strip() if value not in (None, "") else None
+
+
+def _number(value, scale: float = 1, digits: int = 1):
+    try:
+        number = float(value) * scale
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    number = round(number, digits)
+    return int(number) if number.is_integer() else number
+
+
+def normalize_game_story(story: dict) -> dict:
+    """Map the NHL game story into the shared stats columns.
+
+    Team stats go into home/away_team_stats; goals by period, the shootout and
+    the three stars go into game_leaders (the UI renders that shape for NHL).
+    """
+    result = dict.fromkeys(STAT_COLUMNS)
+    summary = story.get("summary") if isinstance(story, dict) else None
+    if not isinstance(summary, dict):
+        return result
+
+    home_abbrev = _text((story.get("homeTeam") or {}).get("abbrev"))
+    season = _text(story.get("season"))
+
+    def headshot(player_id, team):
+        if player_id and team and season:
+            return f"https://assets.nhle.com/mugs/nhl/{season}/{team}/{player_id}.png"
+        return None
+
+    def is_home(raw, team):
+        return raw if isinstance(raw, bool) else (team is not None and team == home_abbrev)
+
+    full_names: dict[str, str] = {}
+
+    def person(raw: dict, team, total_key):
+        player_id = str(raw.get("playerId") or "") or None
+        first, last = _text(raw.get("firstName")), _text(raw.get("lastName"))
+        name = " ".join(p for p in (first, last) if p) or _text(raw.get("name")) or ""
+        if player_id and first and last:
+            full_names[player_id] = name
+        return {
+            "id": player_id,
+            "name": name,
+            "headshot": raw.get("headshot") or headshot(player_id, team),
+            "total": to_int(raw.get(total_key)),
+        }
+
+    periods = []
+    for period in summary.get("scoring") or []:
+        descriptor = period.get("periodDescriptor") or {}
+        period_type = descriptor.get("periodType")
+        # The shootout "goal" is only the deciding marker; attempts come from `shootout`.
+        if period_type == "SO":
+            continue
+        goals = []
+        for goal in period.get("goals") or []:
+            team = _text(goal.get("teamAbbrev"))
+            modifier = goal.get("goalModifier")
+            goals.append({
+                "time": goal.get("timeInPeriod"),
+                "strength": goal.get("strength"),
+                "modifier": modifier if modifier and modifier != "none" else None,
+                "shotType": goal.get("shotType"),
+                "team": team,
+                "isHome": is_home(goal.get("isHome"), team),
+                "homeScore": to_int(goal.get("homeScore")),
+                "awayScore": to_int(goal.get("awayScore")),
+                "scorer": person(goal, team, "goalsToDate"),
+                "assists": [person(a, team, "assistsToDate") for a in goal.get("assists") or []],
+                "clipUrl": goal.get("highlightClipSharingUrl"),
+            })
+        periods.append({
+            "number": to_int(descriptor.get("number")),
+            "type": period_type,
+            "goals": goals,
+        })
+
+    shootout = []
+    for attempt in summary.get("shootout") or []:
+        team = _text(attempt.get("teamAbbrev"))
+        shooter = person(attempt, team, "goals")
+        shootout.append({
+            "sequence": to_int(attempt.get("sequence")),
+            "team": team,
+            "isHome": is_home(None, team),
+            "id": shooter["id"],
+            "name": shooter["name"],
+            "headshot": shooter["headshot"],
+            "result": attempt.get("result"),
+            "gameWinner": bool(attempt.get("gameWinner")),
+        })
+
+    stars = []
+    for star in summary.get("threeStars") or []:
+        team = _text(star.get("teamAbbrev"))
+        player_id = str(star.get("playerId") or "") or None
+        entry = {
+            "star": to_int(star.get("star")),
+            "id": player_id,
+            "name": full_names.get(player_id or "") or _text(star.get("name")) or "",
+            "headshot": star.get("headshot") or headshot(player_id, team),
+            "team": team,
+            "isHome": is_home(None, team),
+            "position": star.get("position"),
+            "sweaterNo": to_int(star.get("sweaterNo")),
+            "goals": to_int(star.get("goals")),
+            "assists": to_int(star.get("assists")),
+            "points": to_int(star.get("points")),
+            "savePct": _number(star.get("savePctg"), digits=3),
+            "gaa": _number(star.get("goalsAgainstAverage"), digits=2),
+        }
+        stars.append({k: v for k, v in entry.items() if v is not None})
+    stars.sort(key=lambda s: s.get("star") or 99)
+
+    team_stats = {"home": {}, "away": {}}
+    keys = {
+        "sog": ("shotsOnGoal", 1),
+        "faceoffWinningPctg": ("faceoffPct", 100),
+        "powerPlayPctg": ("powerPlayPct", 100),
+        "pim": ("pim", 1),
+        "hits": ("hits", 1),
+        "blockedShots": ("blockedShots", 1),
+        "giveaways": ("giveaways", 1),
+        "takeaways": ("takeaways", 1),
+    }
+    for stat in summary.get("teamGameStats") or []:
+        category = stat.get("category")
+        for side in ("home", "away"):
+            raw = stat.get(f"{side}Value")
+            if category == "powerPlay":
+                parts = str(raw or "").split("/")
+                if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+                    team_stats[side]["powerPlayGoals"] = int(parts[0])
+                    team_stats[side]["powerPlayOpportunities"] = int(parts[1])
+            elif category in keys:
+                key, scale = keys[category]
+                value = _number(raw, scale)
+                if value is not None:
+                    team_stats[side][key] = value
+
+    for side in ("home", "away"):
+        if team_stats[side]:
+            result[f"{side}_team_stats"] = json.dumps(team_stats[side])
+    if periods or shootout or stars:
+        result["game_leaders"] = json.dumps({
+            "sport": "NHL",
+            "homeTeam": home_abbrev,
+            "awayTeam": _text((story.get("awayTeam") or {}).get("abbrev")),
+            "periods": periods,
+            "shootout": shootout,
+            "threeStars": stars,
+        })
+    return result
+
+
+def fetch_game_stats(game_id: str) -> dict:
+    try:
+        story = fetch_json(GAME_STORY_URL.format(game_id=game_id), headers={
+            "User-Agent": USER_AGENT, "Accept": "application/json",
+        })
+        stats = normalize_game_story(story) if isinstance(story, dict) else dict.fromkeys(STAT_COLUMNS)
+    except (SystemExit, ValueError, TypeError, AttributeError) as exc:
+        print(f"    stats unavailable for {game_id}: {exc}", flush=True)
+        return dict.fromkeys(STAT_COLUMNS)
+    if not any(stats.values()):
+        print(f"    stats unavailable for {game_id}: empty game story", flush=True)
+    return stats
+
+
 def nhl_week_number(game_date: datetime | None, season_start: datetime | None) -> int | None:
     if game_date is None or season_start is None:
         return None
@@ -539,6 +719,11 @@ def main() -> None:
         help="Re-run the highlight search even for games that already have a reviewed highlight.",
     )
     parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="Backfill game stats for existing games without changing highlights or other game data.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Fetch and score but do not write to Postgres.",
@@ -599,6 +784,28 @@ def main() -> None:
                 continue
 
             if to_int(pick(game, "gameType")) == 1:
+                continue
+
+            if args.stats_only:
+                game_id = str(pick(game, "id"))
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM games WHERE external_id = %s", (game_id,))
+                    existing = cur.fetchone()
+                    if existing is None:
+                        continue
+                    stats = fetch_game_stats(game_id)
+                    if not args.dry_run:
+                        cur.execute(
+                            "UPDATE games SET "
+                            + ", ".join(f"{column} = COALESCE(%s, {column})" for column in STAT_COLUMNS)
+                            + " WHERE id = %s",
+                            [stats[column] for column in STAT_COLUMNS] + [existing[0]],
+                        )
+                updated += 1
+                if not args.dry_run and updated % 20 == 0:
+                    conn.commit()
+                if args.limit and updated >= args.limit:
+                    break
                 continue
 
             home_id = resolve_team(game, "home", by_ext, by_name)
@@ -673,7 +880,7 @@ def main() -> None:
                 home_name,
                 away_name,
             )
-
+            row.update(fetch_game_stats(str(pick(game, "id"))) if completed else dict.fromkeys(STAT_COLUMNS))
             # Preserve manually reviewed rows when no new search result is chosen.
             if do_search or not existing:
                 row["highlights_valid"] = bool(video_id)
@@ -700,6 +907,9 @@ def main() -> None:
                     "home_points = %s",
                     "away_points = %s",
                     "overtime = %s",
+                    "home_team_stats = COALESCE(%s, home_team_stats)",
+                    "away_team_stats = COALESCE(%s, away_team_stats)",
+                    "game_leaders = COALESCE(%s, game_leaders)",
                     "synced_at = NOW()",
                 ]
                 vals = [
@@ -714,6 +924,9 @@ def main() -> None:
                     row["home_points"],
                     row["away_points"],
                     row["overtime"],
+                    row["home_team_stats"],
+                    row["away_team_stats"],
+                    row["game_leaders"],
                 ]
                 if do_search and not checked:
                     sets += ["video_id = %s", "highlights_valid = %s"]
@@ -731,14 +944,15 @@ def main() -> None:
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
-                            modified
+                            modified, home_team_stats, away_team_stats, game_leaders
                         ) VALUES (
                             %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
                             %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,
-                            %(review_status)s, %(modified)s
+                            %(review_status)s, %(modified)s, %(home_team_stats)s,
+                            %(away_team_stats)s, %(game_leaders)s
                         )
                         """,
                         row,

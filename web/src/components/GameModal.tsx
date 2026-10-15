@@ -14,6 +14,7 @@ import { shortSportLabel } from "@/lib/sports";
 import { setShowResults, useShowResults } from "@/lib/prefs";
 import { FormList, loadForm } from "@/components/TeamForm";
 import { GameLeaders } from "@/components/GameLeaders";
+import { NhlScoring, NhlThreeStars, nhlStory } from "@/components/NhlGameStats";
 
 function TeamRow({
   name,
@@ -126,14 +127,52 @@ function Meta({ label, value }: { label: string; value: string }) {
   );
 }
 
+type TeamStats = Record<string, number | null> | null;
+
+type TeamStatDef = {
+  key: string;
+  label: string;
+  format?: (value: number, stats: TeamStats) => string;
+};
+
+const FOOTBALL_STATS: TeamStatDef[] = [
+  { key: "passingYards", label: "Pass Yds" },
+  { key: "rushingYards", label: "Rush Yds" },
+  { key: "totalYards", label: "Total Yds" },
+  { key: "tackles", label: "Tackles" },
+  { key: "sacks", label: "Sacks" },
+  { key: "interceptions", label: "Interceptions" },
+  { key: "fumbles", label: "Fumbles" },
+];
+
+const NHL_STATS: TeamStatDef[] = [
+  { key: "shotsOnGoal", label: "Shots" },
+  { key: "faceoffPct", label: "Faceoff %", format: (v) => `${v.toFixed(1)}%` },
+  {
+    key: "powerPlayPct",
+    label: "Power Play",
+    format: (v, s) =>
+      s?.powerPlayGoals != null && s?.powerPlayOpportunities != null
+        ? `${s.powerPlayGoals}/${s.powerPlayOpportunities}`
+        : `${v}%`,
+  },
+  { key: "pim", label: "Penalty Min" },
+  { key: "hits", label: "Hits" },
+  { key: "blockedShots", label: "Blocked" },
+  { key: "giveaways", label: "Giveaways" },
+  { key: "takeaways", label: "Takeaways" },
+];
+
 function TeamStatChart({
   game,
   collapsed,
   onToggle,
+  statDefs = FOOTBALL_STATS,
 }: {
   game: GameView;
   collapsed: boolean;
   onToggle: () => void;
+  statDefs?: TeamStatDef[];
 }) {
   function chartColor(raw: string | null | undefined, fallback: string): string {
     const value = String(raw ?? "").trim();
@@ -144,16 +183,6 @@ function TeamStatChart({
     }
     return fallback;
   }
-
-  const statDefs = [
-    { key: "passingYards", label: "Pass Yds" },
-    { key: "rushingYards", label: "Rush Yds" },
-    { key: "totalYards", label: "Total Yds" },
-    { key: "tackles", label: "Tackles" },
-    { key: "sacks", label: "Sacks" },
-    { key: "interceptions", label: "Interceptions" },
-    { key: "fumbles", label: "Fumbles" },
-  ] as const;
 
   const values = statDefs
     .map((stat) => ({
@@ -226,8 +255,10 @@ function TeamStatChart({
           const max = Math.max(homeValue, awayValue, 1);
           const homeWidth = Math.max(0, (homeValue / max) * 100);
           const awayWidth = Math.max(0, (awayValue / max) * 100);
-          const homeLabel = stat.home == null ? "—" : stat.home;
-          const awayLabel = stat.away == null ? "—" : stat.away;
+          const homeLabel =
+            stat.home == null ? "—" : stat.format ? stat.format(stat.home, game.homeTeamStats) : stat.home;
+          const awayLabel =
+            stat.away == null ? "—" : stat.format ? stat.format(stat.away, game.awayTeamStats) : stat.away;
 
           return (
             <div key={stat.key} className="border-t border-[var(--input-border)] pt-2 first:border-t-0 first:pt-0">
@@ -297,6 +328,8 @@ export function GameModal() {
   const showResults = useShowResults();
   const [teamStatsCollapsed, setTeamStatsCollapsed] = useState(false);
   const [gameLeadersCollapsed, setGameLeadersCollapsed] = useState(false);
+  const [scoringCollapsed, setScoringCollapsed] = useState(false);
+  const [threeStarsCollapsed, setThreeStarsCollapsed] = useState(false);
 
   const close = useCallback(() => {
     const next = new URLSearchParams(params.toString());
@@ -346,6 +379,7 @@ export function GameModal() {
   const videoId = game?.videoId ?? null;
   const isNflGame = game?.conferenceType === "NFL";
   const isFootballGame = isNflGame || game?.conferenceType === "FBS" || game?.conferenceType === "FCS";
+  const story = game?.conferenceType === "NHL" ? nhlStory(game) : null;
   const meta: { label: string; value: string }[] = [];
   if (game) {
     if (game.season) meta.push({ label: "Season", value: game.season });
@@ -519,6 +553,33 @@ export function GameModal() {
                 game={game}
                 collapsed={gameLeadersCollapsed}
                 onToggle={() => setGameLeadersCollapsed((v) => !v)}
+              />
+            ) : null}
+
+            {story ? (
+              <>
+                <NhlScoring
+                  game={game}
+                  story={story}
+                  showResults={showResults}
+                  collapsed={scoringCollapsed}
+                  onToggle={() => setScoringCollapsed((v) => !v)}
+                />
+                <NhlThreeStars
+                  game={game}
+                  story={story}
+                  collapsed={threeStarsCollapsed}
+                  onToggle={() => setThreeStarsCollapsed((v) => !v)}
+                />
+              </>
+            ) : null}
+
+            {game.conferenceType === "NHL" ? (
+              <TeamStatChart
+                game={game}
+                statDefs={NHL_STATS}
+                collapsed={teamStatsCollapsed}
+                onToggle={() => setTeamStatsCollapsed((v) => !v)}
               />
             ) : null}
 

@@ -20,7 +20,7 @@ web/                      # Next.js app
   .env.example            # DATABASE_URL template
 importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
-  import_nhl_games.py     # NHL API -> Postgres (games + YouTube highlights)
+  import_nhl_games.py     # NHL API -> Postgres (games, stats + YouTube highlights)
   import_nba_games.py     # ESPN NBA API -> Postgres (games + YouTube highlights)
   import_nfl_games.py     # nflverse + ESPN -> Postgres (games, stats + highlights)
   sync_airtable.py        # Airtable -> Postgres (teams + games)
@@ -194,7 +194,26 @@ season explicitly with an eight-digit season code such as `20232024`:
 python3 importer/import_nhl_games.py
 python3 importer/import_nhl_games.py --season 20232024
 python3 importer/import_nhl_games.py --season 20222023 --dry-run
+# Backfill game stats only, preserving all existing game metadata/highlight reviews:
+python3 importer/import_nhl_games.py --stats-only
+python3 importer/import_nhl_games.py --season 20252026 --stats-only
 ```
+
+For every completed game the importer also fetches the NHL game story
+(`/v1/wsc/game-story/{gameId}`) and stores it for the game modal:
+
+- **Scoring**: goals grouped by period (including overtime) with scorer and
+  assists (headshots and season totals), running score, PPG/SHG/EN badges and a
+  link to the goal clip, plus every shootout attempt. Goals stay hidden while
+  "Show result" is off.
+- **Three Stars**: headshot, number, position and team, with G/A/P for skaters
+  or SV%/GAA for goalies.
+- **Team Stats**: shots, faceoff %, power play, penalty minutes, hits, blocked
+  shots, giveaways and takeaways.
+
+Team stats are stored in `home_team_stats`/`away_team_stats`, and goals, shootout
+and three stars in `game_leaders` (no schema change needed). An unavailable game
+story is logged and never erases previously imported stats.
 
 Common flags:
 
@@ -204,6 +223,7 @@ Common flags:
 | `--include-future`   | Also import games that have not started yet.                       |
 | `--no-highlights`    | Skip the YouTube highlight search.                                 |
 | `--force-highlights` | Re-run the highlight search even for already-checked games.        |
+| `--stats-only`       | Only backfill game stats for existing games (no highlight search). |
 | `--limit N`          | Stop after importing N games (testing).                            |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                      |
 
