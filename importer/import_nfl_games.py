@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Import NFL games and highlights into Postgres.
 
-This is the Python equivalent of the two N8N workflows attached in the task:
-
-- the main workflow fetches NFL games from nflverse/games.csv,
+- Fetches NFL games from nflverse/games.csv,
 - fetches quarter scores, team stats, and game leaders using the CSV's ESPN id,
 - resolves NFL teams from the local `teams` table,
 - builds the YouTube search URL,
@@ -36,7 +34,6 @@ import os
 import random
 import re
 import ssl
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from io import StringIO
@@ -46,8 +43,7 @@ from urllib.request import Request, urlopen
 
 import psycopg
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import n8n_find_highlight as scorer  # noqa: E402
+import highlight_scorer as scorer
 
 NFLVERSE_GAMES_URL = (
     "https://raw.githubusercontent.com/nflverse/nfldata/refs/heads/master/data/games.csv"
@@ -556,7 +552,7 @@ def game_row(
     game_id = str(pick(game, "game_id", "id", "gameId"))
 
     return {
-        "airtable_id": f"nfl:{game_id}",
+        "source_id": f"nfl:{game_id}",
         "external_id": game_id,
         "name": f"{away_label} at {home_label}" if home_label and away_label else None,
         "season": str(season) if season is not None else None,
@@ -888,14 +884,14 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            airtable_id, external_id, name, season, week, type, game_date, location,
+                            source_id, external_id, name, season, week, type, game_date, location,
                             home_team_id, away_team_id, home_points, away_points, home_line_scores,
                             away_line_scores, home_team_stats, away_team_stats, game_leaders,
                             home_rank, away_rank, home_record, away_record, overtime,
                             excitement_index, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status, modified
                         ) VALUES (
-                            %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
+                            %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
                             %(game_date)s, %(location)s, %(home_team_id)s, %(away_team_id)s,
                             %(home_points)s, %(away_points)s, %(home_line_scores)s,
                             %(away_line_scores)s, %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s,

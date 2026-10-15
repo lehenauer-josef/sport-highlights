@@ -1,23 +1,12 @@
-# N8N Python (Pyodide) Code node — "Run Once for Each Item"
-#
-# Input : each item provides the pre-fetched YouTube search results plus the
-#         home/away team names, e.g.
-#           {
-#             "home_team": "Holy Cross",
-#             "away_team": "Lehigh",
-#             "videos": [
-#               {"videoId": "...", "url": "...", "title": "...",
-#                "duration": "14:40", "views": 41, "channel": "..."},
-#               ...
-#             ]
-#           }
-#         Adjust the *_FIELD names below to match your incoming JSON keys.
-# Output: the original item merged with the best highlight found:
-#         highlight_video_id, highlight_url, highlight_title, highlight_channel,
-#         highlight_views, highlight_duration_seconds, highlight_score,
-#         highlight_valid, highlight_reason
-#
-# No imports are used — N8N's Pyodide sandbox disallows all stdlib modules.
+"""Score YouTube search results and pick the best game-highlight video.
+
+Shared by all importers. `find_best_video(home, away, videos, home_mascot,
+away_mascot)` takes search results shaped like
+    {"videoId": "...", "url": "...", "title": "...", "duration": "14:40",
+     "views": 41, "channel": "..."}
+and returns the best-scoring candidate (with `video_id`, `title`, `score`, ...)
+or None when nothing is a convincing highlight.
+"""
 
 MIN_DURATION_S = 120
 MAX_DURATION_S = 1800
@@ -448,42 +437,3 @@ def find_best_video(home, away, videos, home_mascot=None, away_mascot=None):
             and duration_is_valid(best.get("duration_seconds")) is not False):
         return best
     return None
-
-# N8N Pyodide entry point. In the n8n node the body below is pasted directly
-# (n8n wraps it in a function so the top-level `return` is valid); wrapping it
-# here keeps the exact logic while letting the importer `import` this module.
-def n8n_entry(_item):
-    home = _item["json"]["game"]["homeTeam"]
-    away = _item["json"]["game"]["awayTeam"]
-    videos = _item["json"]["videos"]
-    home_mascot = _item["json"]["homeTeam"].get("mascot")
-    away_mascot = _item["json"]["awayTeam"].get("mascot")
-
-    best = find_best_video(home, away, videos, home_mascot, away_mascot)
-
-    if best:
-        result = {
-            "highlight_video_id": best["video_id"],
-            "highlight_url": best["url"],
-            "highlight_title": best["title"],
-            "highlight_channel": best.get("channel"),
-            "highlight_views": best.get("views"),
-            "highlight_duration_seconds": best.get("duration_seconds"),
-            "highlight_score": best["score"],
-            "highlight_valid": True,
-            "highlight_reason": None,
-        }
-    else:
-        result = {
-            "highlight_video_id": None,
-            "highlight_url": None,
-            "highlight_title": None,
-            "highlight_channel": None,
-            "highlight_views": None,
-            "highlight_duration_seconds": None,
-            "highlight_score": None,
-            "highlight_valid": False,
-            "highlight_reason": "no matching highlight found",
-        }
-
-    return {**result}

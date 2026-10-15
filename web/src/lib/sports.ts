@@ -1,4 +1,4 @@
-// Groups Airtable "Conference Type" values into the sports shown in the UI.
+// Groups the teams' "conference type" values into the sports shown in the UI.
 // FCS + FBS are both college football; Soccer is excluded entirely.
 export const SPORT_GROUPS: Record<string, string[]> = {
   "College Football": ["FCS", "FBS"],

@@ -55,7 +55,10 @@ export async function POST(request: Request) {
       })
       .where(eq(games.id, id));
   } else {
-    const [game] = await db.select().from(games).where(eq(games.id, id));
+    const [game] = await db
+      .select({ betterVideoId: games.betterVideoId })
+      .from(games)
+      .where(eq(games.id, id));
     if (!game?.betterVideoId) {
       return NextResponse.json({ error: "no better match" }, { status: 400 });
     }

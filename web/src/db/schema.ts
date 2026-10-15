@@ -11,12 +11,13 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-// Canonical team data (name, logo, conference, division), synced from the
-// Airtable "Teams" table; NBA teams come from ESPN via import_nba_games.py.
+// Canonical team data (name, logo, conference, division). Teams are maintained in
+// the database; NBA teams are synced from ESPN by import_nba_games.py.
 // Games reference these rows instead of duplicating team attributes on every game.
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
-  airtableId: text("airtable_id").notNull().unique(),
+  // Unique import key, e.g. "nba:<espn id>"; legacy rows keep their original key.
+  sourceId: text("source_id").notNull().unique(),
   externalId: text("external_id"),
   name: text("name"),
   mascot: text("mascot"),
@@ -25,7 +26,7 @@ export const teams = pgTable("teams", {
   color: text("color"),
   logoUrl: text("logo_url"),
   conferenceLogoUrl: text("conference_logo_url"),
-  // Downloaded image bytes (base64) so logos survive Airtable URL expiry.
+  // Downloaded image bytes (base64) so logos never depend on expiring image URLs.
   logoData: text("logo_data"),
   logoMime: text("logo_mime"),
   conferenceLogoData: text("conference_logo_data"),
@@ -49,7 +50,8 @@ export type Team = typeof teams.$inferSelect;
 // only game-specific data (rank, record, points, video) lives here.
 export const games = pgTable("games", {
   id: serial("id").primaryKey(),
-  airtableId: text("airtable_id").notNull().unique(),
+  // Unique import key, e.g. "nfl:<game id>", "nhl:<game id>", "cfbd:<game id>".
+  sourceId: text("source_id").notNull().unique(),
   externalId: text("external_id"),
   name: text("name"),
 

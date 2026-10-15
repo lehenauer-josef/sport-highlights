@@ -65,7 +65,6 @@ const gameWeek = sql<number | null>`coalesce(
 // Flattened game shape the UI consumes (team attributes come from the join).
 export const gameColumns = {
   id: games.id,
-  airtableId: games.airtableId,
   externalId: games.externalId,
   name: games.name,
   season: games.season,
@@ -114,7 +113,6 @@ export const gameColumns = {
 
 export type GameView = {
   id: number;
-  airtableId: string;
   externalId: string | null;
   name: string | null;
   season: string | null;

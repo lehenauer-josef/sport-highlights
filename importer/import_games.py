@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """Import College Football games straight from the collegefootballdata.com API
-into Postgres — a Python replacement for the two N8N workflows.
+into Postgres.
 
-The old pipeline was: N8N pulled the CFD calendar + games, searched YouTube for
-each game's best highlight, and upserted everything into Airtable, after which
-sync_airtable.py mirrored Airtable into Postgres. This script collapses that
-into one step by writing games (and the highlight it finds) directly to the
+Fetches the CFD calendar + games, searches YouTube for each game's best
+highlight, and writes games (and the highlight it finds) directly to the
 `games` table.
 
-Teams are expected to already exist in the `teams` table (populated by
-sync_airtable.py); games link to them by CFD team id (external_id) with a
-normalized-name fallback. Games are keyed on external_id (the CFD game id), so
-re-runs update in place and any existing Airtable-sourced row is reused.
+Teams are expected to already exist in the `teams` table; games link to them by
+CFD team id (external_id) with a normalized-name fallback. Games are keyed on
+external_id (the CFD game id), so re-runs update existing rows in place.
 
-The YouTube search + "best highlight" scorer is reused verbatim from
-check_highlights.py so the ranking stays identical to the validation tooling.
+Highlights are ranked by the shared scorer in `highlight_scorer.py`.
 
 Usage:
     pip install -r requirements.txt
@@ -34,7 +30,6 @@ import os
 import random
 import re
 import ssl
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -43,9 +38,7 @@ from urllib.request import Request, urlopen
 
 import psycopg
 
-# Reuse the exact "best highlight" scorer the retired N8N workflow used.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import n8n_find_highlight as scorer  # noqa: E402
+import highlight_scorer as scorer
 
 CFBD_BASE = "https://api.collegefootballdata.com"
 USER_AGENT = "cfb-highlights-importer/1.0"
@@ -398,13 +391,13 @@ def apply_pregame_records(conn, season: int) -> int:
 
 INSERT_SQL = """
 INSERT INTO games (
-    airtable_id, external_id, name, season, week, type, game_date, location,
+    source_id, external_id, name, season, week, type, game_date, location,
     home_team_id, away_team_id, home_points, away_points, home_line_scores,
     away_line_scores, home_team_stats, away_team_stats, game_leaders, home_rank, away_rank,
     home_record, away_record,
     excitement_index, video_id, highlights_valid, highlights_checked, review_status
 ) VALUES (
-    %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
+    %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
     %(game_date)s, %(location)s, %(home_team_id)s, %(away_team_id)s,
     %(home_points)s, %(away_points)s, %(home_line_scores)s, %(away_line_scores)s,
     %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s, %(home_rank)s, %(away_rank)s,
@@ -495,8 +488,8 @@ def _add_video(vr, out, seen):
 
 def search_youtube(query, limit=20):
     """Scrape a YouTube search page into the {videoId,title,channel,views,duration}
-    shape the n8n scorer expects. Skips live streams and results without a
-    duration, mirroring the n8n 'Parse Video Information' node."""
+    shape the highlight scorer expects. Skips live streams and results without a
+    duration."""
     html = fetch_youtube_html(YT_SEARCH_URL + quote_plus(query))
     if not html:
         return []
@@ -545,7 +538,7 @@ def build_query(home, away, game_date):
 
 
 def find_highlight(home, away, game_date, home_mascot, away_mascot):
-    """Search YouTube, then score the results with the n8n scorer; best id or None."""
+    """Search YouTube, then score the results with the highlight scorer; best id or None."""
     if not (home and away):
         return None
     try:
@@ -1066,7 +1059,7 @@ def main() -> None:
                         )
                     updated += 1
                 else:
-                    row["airtable_id"] = f"cfbd:{row['external_id']}"
+                    row["source_id"] = f"cfbd:{row['external_id']}"
                     row["video_id"] = video_id
                     row["highlights_valid"] = highlights_valid
                     with conn.cursor() as cur:

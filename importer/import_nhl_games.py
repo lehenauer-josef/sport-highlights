@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Import NHL games and highlights into Postgres.
 
-This script mirrors the attached N8N workflows in a standalone Python importer:
-
-- it loads NHL teams from the local `teams` table,
+- Loads NHL teams from the local `teams` table,
 - fetches each team's season schedule from the NHL API,
 - deduplicates games across teams,
 - skips preseason games,
@@ -12,8 +10,7 @@ This script mirrors the attached N8N workflows in a standalone Python importer:
 - and upserts the result into `games`.
 
 Use `--season` to import a historical season such as `20232024` or `20222023`.
-If `--season` is omitted, the importer uses the live `/now` endpoint, matching
-the main workflow.
+If `--season` is omitted, the importer uses the live `/now` endpoint.
 
 Usage:
     pip install -r requirements.txt
@@ -32,7 +29,6 @@ import os
 import random
 import re
 import ssl
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -41,8 +37,7 @@ from urllib.request import Request, urlopen
 
 import psycopg
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import n8n_find_highlight as scorer  # noqa: E402
+import highlight_scorer as scorer
 
 DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nhl-highlights-importer/1.0"
@@ -355,8 +350,7 @@ def choose_highlight(
         base = game_date or datetime.now(timezone.utc)
         before = (base + timedelta(days=3)).date().isoformat()
         after = (base - timedelta(days=1)).date().isoformat()
-        # This matches the N8N search window and order.
-        # Match the attached N8N workflow: away vs home + NHL highlights.
+        # Search window: 1 day before to 3 days after; away vs home + NHL highlights.
         query = f"{away} vs {home} NHL highlights before:{before} after:{after}"
         search_url = YT_SEARCH_URL + quote_plus(query)
         videos = search_youtube(query, limit=10)
@@ -664,7 +658,7 @@ def build_row(
     game_type = to_int(pick(game, "gameType"))
 
     return {
-        "airtable_id": f"nhl:{game_id}",
+        "source_id": f"nhl:{game_id}",
         "external_id": game_id,
         "name": f"{away_name} at {home_name}" if home_name and away_name else None,
         "season": normalize_nhl_season(season_label),
@@ -940,13 +934,13 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            airtable_id, external_id, name, season, week, type, game_date,
+                            source_id, external_id, name, season, week, type, game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
                             modified, home_team_stats, away_team_stats, game_leaders
                         ) VALUES (
-                            %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
+                            %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
                             %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,

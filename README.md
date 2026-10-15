@@ -21,13 +21,14 @@ web/                      # Next.js app
 importer/
   import_games.py         # CFD API -> Postgres (games + YouTube highlights)
   import_nhl_games.py     # NHL API -> Postgres (games, stats + YouTube highlights)
-  import_nba_games.py     # ESPN NBA API -> Postgres (games + YouTube highlights)
+  import_nba_games.py     # ESPN NBA API -> Postgres (teams, games + YouTube highlights)
   import_nfl_games.py     # nflverse + ESPN -> Postgres (games, stats + highlights)
-  sync_airtable.py        # Airtable -> Postgres (teams + games)
+  highlight_scorer.py     # shared YouTube highlight scorer (used by all importers)
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
-n8n_find_highlight.py     # production highlight scorer (used by import_games.py)
-check_highlights.py       # older standalone validation harness
+db/
+  highlights.sql.gz.part-*  # database snapshot (see "Restore from the bundled dump")
+  migrations/               # SQL migrations for existing databases
 ```
 
 ## Prerequisites
@@ -36,7 +37,6 @@ check_highlights.py       # older standalone validation harness
 - Node.js 18+ and npm
 - Python 3.9+
 - A [College Football Data API](https://collegefootballdata.com/key) key (for `import_games.py`)
-- An Airtable Personal Access Token (only for `sync_airtable.py`)
 
 ---
 
@@ -58,18 +58,35 @@ re-running all the importers:
 ```bash
 docker compose up -d                                   # start Postgres first
 cat db/highlights.sql.gz.part-* | gunzip | docker exec -i cfb_highlights_db psql -U cfb -d highlights
+docker exec -i cfb_highlights_db psql -U cfb -d highlights < db/migrations/0001_rename_airtable_id_to_source_id.sql
+npm --prefix web run db:push                           # add any columns newer than the snapshot
 ```
 
-This loads all teams and games (including logos and highlight picks). To refresh
-the snapshot after new imports, regenerate the parts with:
+This loads all teams and games (including logos and highlight picks). The
+snapshot predates the `airtable_id` → `source_id` rename, so run the migration
+right after restoring it. Teams are maintained in the database (only the NBA
+importer creates or updates teams), so the snapshot is also the source of the
+college football, NFL and NHL teams. To refresh the snapshot after new imports,
+regenerate the parts with:
 
 ```bash
 docker exec cfb_highlights_db pg_dump -U cfb -d highlights --no-owner --no-privileges | gzip > db/highlights.sql.gz
 split -b 45m db/highlights.sql.gz db/highlights.sql.gz.part- && rm db/highlights.sql.gz
 ```
 
-If you restore from the dump you can skip the schema push and the importer steps
-below.
+If you restore from the dump you can skip the importer steps below.
+
+### Migrations for existing databases
+
+Apply the SQL files in `db/migrations/` in order to databases created before the
+change (they are safe to re-run):
+
+```bash
+psql "$DATABASE_URL" -f db/migrations/0001_rename_airtable_id_to_source_id.sql
+```
+
+`0001` renames the legacy `airtable_id` key column of `teams` and `games` to
+`source_id` (the unique import key, e.g. `nfl:2024_15_BAL_NYG`).
 
 ## 2. Start the web application
 
@@ -115,7 +132,7 @@ pip install -r importer/requirements.txt
 
 This is the primary importer. It fetches games from the College Football Data API,
 resolves each team against the `teams` table, searches YouTube for the best
-highlight video using the scorer in `n8n_find_highlight.py`, and upserts everything
+highlight video using the scorer in `importer/highlight_scorer.py`, and upserts everything
 into Postgres.
 
 Provide your CFD API key via the `CFBD_API_KEY` environment variable **or** a
@@ -155,28 +172,11 @@ Notes:
 - Games are keyed on the CFD game id; re-running updates in place.
 - A game already marked as human-reviewed is never overwritten by the search.
 - Teams are read-only: the importer only resolves existing teams, it never
-  creates or modifies them. Populate teams first via `sync_airtable.py`.
+  creates or modifies them. They come with the database snapshot.
 
-### B. Sync teams (and games) from Airtable (`sync_airtable.py`)
+### B. Import NHL games + highlights (`import_nhl_games.py`)
 
-Use this to populate the `teams` table (the source of teams the CFD importer
-resolves against) and, optionally, to mirror Airtable's games.
-
-Provide your Airtable token via the `AIRTABLE_PAT` environment variable **or** a
-`.airtable_pat` file in the repo root:
-
-```bash
-export AIRTABLE_PAT=your_pat_here
-export DATABASE_URL=postgres://cfb:cfb@localhost:5433/highlights
-
-python3 importer/sync_airtable.py                 # full sync
-python3 importer/sync_airtable.py --limit 50      # first N records (testing)
-python3 importer/sync_airtable.py --cfb-only      # only FBS/FCS games
-```
-
-### C. Import NHL games + highlights (`import_nhl_games.py`)
-
-This importer mirrors the NHL N8N workflow. It pulls each NHL team's schedule
+This importer pulls each NHL team's schedule
 from `api-web.nhle.com`, deduplicates games across teams, searches YouTube for
 the best highlight, and upserts the result into Postgres.
 NHL does not provide numbered weeks, so the importer derives them as consecutive
@@ -227,10 +227,9 @@ Common flags:
 | `--limit N`          | Stop after importing N games (testing).                            |
 | `--dry-run`          | Fetch and score but do not write to Postgres.                      |
 
-### D. Import NBA games + highlights (`import_nba_games.py`)
+### C. Import NBA games + highlights (`import_nba_games.py`)
 
-This importer mirrors the "NBA Game Highlights" / "NBA Highlight Search" N8N
-workflows. It fetches each game day from the ESPN NBA scoreboard API, skips
+This importer fetches each game day from the ESPN NBA scoreboard API, skips
 preseason and All-Star games, searches YouTube for the best highlight (preferring
 a full-length "GameTime Highlights" upload naming both teams, and rejecting videos
 whose title names a different date or playoff game number), and upserts the
@@ -250,12 +249,10 @@ Arizona), so teams are identified by sport + id: `teams` has a unique key on
 `(conference_type, external_id)`. NBA team data is owned by this importer: on
 every run it syncs the NBA rows from ESPN's NBA team list (name, nickname,
 conference, color, logo), adds missing teams, and carries renames into the
-stored game names. `sync_airtable.py` no longer overwrites existing NBA teams,
-because the Airtable NBA records contain the data of the college teams with the
-same ids. College team rows are never modified.
+stored game names. College team rows are never modified.
 
 ```bash
-python3 importer/import_nba_games.py                        # last 17 days (like the workflow)
+python3 importer/import_nba_games.py                        # last 17 days
 python3 importer/import_nba_games.py --days 3
 python3 importer/import_nba_games.py --season 2025-26
 python3 importer/import_nba_games.py --season 2026 --limit 10 --dry-run
@@ -275,7 +272,7 @@ Common flags:
 
 ---
 
-### E. Import NFL games, stats + highlights (`import_nfl_games.py`)
+### D. Import NFL games, stats + highlights (`import_nfl_games.py`)
 
 NFL schedules and final scores come from nflverse's games CSV. For completed
 games, the importer uses the CSV's `espn` event ID to fetch ESPN's NFL summary:
@@ -304,12 +301,13 @@ appear; no database migration or ESPN API key is required.
 
 ```bash
 docker compose up -d                              # 1. database
+cat db/highlights.sql.gz.part-* | gunzip | docker exec -i cfb_highlights_db psql -U cfb -d highlights
+docker exec -i cfb_highlights_db psql -U cfb -d highlights < db/migrations/0001_rename_airtable_id_to_source_id.sql
 cp web/.env.example web/.env                      # 2. web env
 npm --prefix web install && npm --prefix web run db:push
-python3 importer/sync_airtable.py                 # 3. load teams
-export CFBD_API_KEY=your_key_here                 # 4. import games + highlights
+export CFBD_API_KEY=your_key_here                 # 3. import games + highlights
 python3 importer/import_games.py --season 2022 --week 4
-npm --prefix web run dev                          # 5. run the app
+npm --prefix web run dev                          # 4. run the app
 ```
 
 ## Database access

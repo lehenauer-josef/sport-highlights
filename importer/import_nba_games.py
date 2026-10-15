@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Import NBA games and highlights into Postgres.
 
-This script mirrors the "NBA Game Highlights" / "NBA Highlight Search" N8N
-workflows in a standalone Python importer:
-
-- it syncs the NBA rows of the `teams` table from ESPN's NBA team list (matched
+- It syncs the NBA rows of the `teams` table from ESPN's NBA team list (matched
   on sport + ESPN team id, since ESPN ids are shared with college teams),
 - fetches each game day from the ESPN scoreboard API,
 - skips preseason games,
 - searches YouTube for the best highlight video (preferring a full-length
-  "GameTime Highlights" upload that names both teams, like the workflow),
+  "GameTime Highlights" upload that names both teams),
 - and upserts the result into `games` (keyed by the ESPN event id).
 
-Without `--season` the importer processes the last `--days` days (default 17,
-the same window as the N8N workflow). Use `--season` to import a whole season;
+Without `--season` the importer processes the last `--days` days (default 17).
+Use `--season` to import a whole season;
 NBA seasons are identified by their end year, so `2026` (or `2025-26`) is the
 2025-26 season.
 
@@ -37,7 +34,6 @@ import os
 import random
 import re
 import ssl
-import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -47,8 +43,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import n8n_find_highlight as scorer  # noqa: E402
+import highlight_scorer as scorer
 
 DEFAULT_DB_URL = "postgres://cfb:cfb@localhost:5433/highlights"
 USER_AGENT = "nba-highlights-importer/1.0"
@@ -206,7 +201,7 @@ def competitor(event: dict, side: str) -> dict:
     for comp in competitors:
         if comp.get("homeAway") == side:
             return comp
-    # The N8N workflow assumes ESPN's order: home first, away second.
+    # ESPN lists competitors home first, away second.
     idx = 0 if side == "home" else 1
     return competitors[idx] if len(competitors) > idx else {}
 
@@ -215,7 +210,7 @@ def youtube_query(event: dict, away: str | None, home: str | None, game_date: da
     base = game_date or datetime.now(timezone.utc)
     before = (base + timedelta(days=3)).date().isoformat()
     after = (base - timedelta(days=1)).date().isoformat()
-    # Matches the workflow: the ESPN event name ("Away at Home") + NBA highlights.
+    # The ESPN event name ("Away at Home") + NBA highlights.
     teams = pick(event, "name") or f"{away} at {home}"
     return f"{teams} NBA highlights before:{before} after:{after}"
 
@@ -384,7 +379,7 @@ def title_names_both(title, home, away, home_mascot=None, away_mascot=None) -> b
 
 
 def preferred_video(videos, home, away, home_mascot=None, away_mascot=None, game_day=None) -> dict | None:
-    """The workflow's first choice: a >5 min GameTime Highlights video naming both teams."""
+    """First choice: a >5 min GameTime Highlights video naming both teams."""
     candidates = [
         v
         for v in videos
@@ -455,7 +450,7 @@ def choose_highlight(
 
 
 def download_image(url: str | None) -> tuple[str | None, str | None]:
-    """Fetch an image and return (base64 str, mime), like sync_airtable.py stores logos."""
+    """Fetch an image and return (base64 str, mime) for storing logos in the DB."""
     if not url:
         return None, None
     try:
@@ -605,7 +600,7 @@ def sync_nba_teams(conn, dry_run: bool = False) -> int:
                     rename_team_in_games(cur, tid, old_name, values["name"])
             else:
                 cur.execute(
-                    "INSERT INTO teams (airtable_id, external_id, name, mascot, conference, conference_type, "
+                    "INSERT INTO teams (source_id, external_id, name, mascot, conference, conference_type, "
                     "color, logo_url, logo_data, logo_mime, conference_logo_url, conference_logo_data, "
                     "conference_logo_mime) VALUES ('espn:nba:' || %(ext)s, %(ext)s, %(name)s, %(mascot)s, "
                     "%(conference)s, 'NBA', %(color)s, %(logo_url)s, %(logo_data)s, %(logo_mime)s, "
@@ -648,12 +643,12 @@ def build_row(
     week = nba_week_number(game_date, regular_season_start(season_year)) if season_year else None
 
     return {
-        "airtable_id": f"nba:{event_id}",
+        "source_id": f"nba:{event_id}",
         "external_id": event_id,
         "name": pick(event, "name") or (f"{away_name} at {home_name}" if home_name and away_name else None),
         "season": str(season_year) if season_year else None,
         "week": week,
-        # Matches the workflow: everything after the regular season (incl. play-in) is postseason.
+        # Everything after the regular season (incl. play-in) is postseason.
         "type": "regular" if to_int(pick(season, "type")) == REGULAR_SEASON_TYPE else "postseason",
         "game_date": game_date,
         "location": pick(pick(comp, "venue", default={}), "fullName"),
@@ -782,7 +777,7 @@ def main() -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, video_id, highlights_checked FROM games "
-                    "WHERE external_id = %s OR airtable_id = %s ORDER BY id LIMIT 1",
+                    "WHERE external_id = %s OR source_id = %s ORDER BY id LIMIT 1",
                     (event_id, f"nba:{event_id}"),
                 )
                 existing = cur.fetchone()
@@ -872,13 +867,13 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            airtable_id, external_id, name, season, week, type, game_date,
+                            source_id, external_id, name, season, week, type, game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
                             modified
                         ) VALUES (
-                            %(airtable_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
+                            %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
                             %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,

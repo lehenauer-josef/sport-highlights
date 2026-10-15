@@ -12,7 +12,7 @@ function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Mirrors the Airtable search-URL formula: away vs home + sport + highlights,
+// YouTube search URL: away vs home + sport + highlights,
 // windowed to the days around the game (before: +10d, after: -1d).
 export function youtubeSearchUrl(opts: {
   awayTeamName: string | null;

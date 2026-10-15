@@ -4,7 +4,7 @@ import { teams } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
-// Serves logo bytes stored in the DB so images never expire like Airtable URLs.
+// Serves logo bytes stored in the DB so images never depend on expiring URLs.
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
