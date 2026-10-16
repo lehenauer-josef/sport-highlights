@@ -1,19 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { youtubeThumb, youtubeUrl } from "@/lib/format";
 import { LocalDateTime } from "@/components/LocalDateTime";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
-
-type YouTubeResult = {
-  videoId: string;
-  title: string;
-  channel: string | null;
-  duration: string | null;
-  thumbnail: string;
-};
+import type { YouTubeResult, YouTubeVideoInfo } from "@/lib/youtube";
 
 function VideoPreview({
   label,
@@ -25,18 +18,72 @@ function VideoPreview({
   accent: string;
 }) {
   const thumb = youtubeThumb(videoId);
+  // undefined = still loading, null = unavailable.
+  const [info, setInfo] = useState<YouTubeVideoInfo | null | undefined>(
+    undefined,
+  );
+
+  useEffect(() => {
+    setInfo(undefined);
+    if (!videoId) return;
+    const ctrl = new AbortController();
+    fetch(`/api/youtube-video?v=${encodeURIComponent(videoId)}`, {
+      signal: ctrl.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: YouTubeVideoInfo | null) => setInfo(data))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setInfo(null);
+      });
+    return () => ctrl.abort();
+  }, [videoId]);
+
   return (
     <div className="flex-1">
       <div className={`mb-1 text-xs font-medium ${accent}`}>{label}</div>
       {videoId ? (
-        <a href={youtubeUrl(videoId) ?? "#"} target="_blank" rel="noreferrer">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={thumb ?? ""}
-            alt=""
-            className="aspect-video w-full rounded-lg object-cover"
-          />
-        </a>
+        <>
+          <a
+            href={youtubeUrl(videoId) ?? "#"}
+            target="_blank"
+            rel="noreferrer"
+            className="relative block"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={thumb ?? ""}
+              alt=""
+              className="aspect-video w-full rounded-lg object-cover"
+            />
+            {info?.duration ? (
+              <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[10px] font-medium tabular-nums text-white">
+                {info.duration}
+              </span>
+            ) : null}
+          </a>
+          <div className="mt-1 space-y-0.5 text-[10px] text-[var(--text-subtle)]">
+            {info ? (
+              <>
+                {info.title ? (
+                  <div
+                    className="line-clamp-2 text-xs text-[var(--text)]"
+                    title={info.title}
+                  >
+                    {info.title}
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-x-1">
+                  <span className="truncate">{info.channel ?? "Unknown channel"}</span>
+                  {info.views ? <span>· {info.views}</span> : null}
+                </div>
+              </>
+            ) : info === undefined ? (
+              <span>Loading video info…</span>
+            ) : (
+              <span>Video info unavailable</span>
+            )}
+          </div>
+        </>
       ) : (
         <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-[var(--surface-soft)] text-xs text-[var(--text-subtle)]">
           none
@@ -180,9 +227,9 @@ export function ReviewCard({ game }: { game: GameView }) {
                       {r.title}
                     </a>
                     <div className="mt-0.5 flex items-center gap-2">
-                      {r.channel ? (
+                      {r.channel || r.views ? (
                         <span className="truncate text-[10px] text-[var(--text-subtle)]">
-                          {r.channel}
+                          {[r.channel, r.views].filter(Boolean).join(" · ")}
                         </span>
                       ) : null}
                       <button
