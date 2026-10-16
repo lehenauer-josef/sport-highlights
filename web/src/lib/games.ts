@@ -22,6 +22,11 @@ export type SortField = "date" | "excitement" | "rank";
 export const homeTeam = alias(teams, "home_team");
 export const awayTeam = alias(teams, "away_team");
 
+// Week numbers only apply to non-postseason games; postseason games are
+// grouped under the single "Postseason" week choice for every sport.
+const isPostseason = eq(games.type, "postseason");
+const notPostseason = sql`${games.type} is distinct from 'postseason'`;
+
 // Flattened game shape the UI consumes (team attributes come from the join).
 export const gameColumns = {
   id: games.id,
@@ -173,7 +178,7 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
     const sportTypes = sportTypesKey.split("|").filter(Boolean);
     const cutoff = new Date().toISOString();
     const rows = await db
-      .select({ season: games.season, week: games.week })
+      .select({ season: games.season, week: games.week, type: games.type })
       .from(games)
       .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
       .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
@@ -191,14 +196,15 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
       .limit(1);
 
     const season = rows[0]?.season ?? null;
-    const week = rows[0]?.week ?? null;
+    const week =
+      rows[0]?.type === "postseason" ? "postseason" : (rows[0]?.week ?? null);
 
     return {
       season,
       week: week == null ? null : String(week),
     };
   },
-  ["default-season-week-nba-weeks"],
+  ["default-season-week-regular-weeks"],
   { revalidate: 900 },
 );
 
@@ -244,8 +250,10 @@ function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
   const wantPostseason = f.weeks.includes("postseason");
   if (weekNums.length || wantPostseason) {
     const parts: SQL[] = [];
-    if (weekNums.length) parts.push(inArray(games.week, weekNums));
-    if (wantPostseason) parts.push(eq(games.type, "postseason"));
+    if (weekNums.length) {
+      parts.push(and(inArray(games.week, weekNums), notPostseason)!);
+    }
+    if (wantPostseason) parts.push(isPostseason);
     conditions.push(or(...parts)!);
   }
 
@@ -320,7 +328,7 @@ const cachedFetchGames = unstable_cache(
       hasMore: filters.page * PAGE_SIZE < total,
     };
   },
-  ["games-list-stored-weeks"],
+  ["games-list-regular-weeks"],
   { revalidate: 60 },
 );
 
@@ -511,13 +519,13 @@ const cachedFilterOptions = unstable_cache(
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-        .where(gameScope),
+        .where(and(gameScope, notPostseason)),
       db
         .select({ n: sql<number>`count(*)::int` })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-        .where(and(gameScope, eq(games.type, "postseason"))),
+        .where(and(gameScope, isPostseason)),
     ]);
 
     return {
@@ -531,6 +539,6 @@ const cachedFilterOptions = unstable_cache(
       hasPostseason: (post[0]?.n ?? 0) > 0,
     };
   },
-  ["filter-options-nba-weeks"],
+  ["filter-options-regular-weeks"],
   { revalidate: 1800 },
 );

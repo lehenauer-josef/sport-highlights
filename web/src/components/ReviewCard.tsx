@@ -162,7 +162,11 @@ export function ReviewCard({ game }: { game: GameView }) {
         </h3>
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {shortSportLabel(game.conferenceType)} · {game.season}
-          {game.week ? ` · Wk ${game.week}` : ""}
+          {game.type === "postseason"
+            ? " · Postseason"
+            : game.week
+              ? ` · Wk ${game.week}`
+              : ""}
           <LocalDateTime date={game.gameDate} prefix=" · " />
         </span>
       </div>

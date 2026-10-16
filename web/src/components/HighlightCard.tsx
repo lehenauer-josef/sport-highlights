@@ -138,7 +138,11 @@ export function HighlightCard({ game }: { game: GameView }) {
         <div className="flex items-center justify-between text-sm text-[var(--text-muted)]">
           <span>
             {game.season ? `${game.season}` : ""}
-            {game.week ? ` · Wk ${game.week}` : ""}
+            {game.type === "postseason"
+              ? " · Postseason"
+              : game.week
+                ? ` · Wk ${game.week}`
+                : ""}
             <LocalDateTime date={game.gameDate} prefix=" · " />
           </span>
           {game.excitementIndex != null ? (
