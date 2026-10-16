@@ -7,6 +7,7 @@ import {
   sportToSlug,
 } from "@/lib/sports";
 import {
+  countValidatableReviewGames,
   fetchReviewGames,
   loadDefaultSeasonAndWeek,
   loadFilterOptions,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/games";
 import { fallbackWeek, weeksAvailable } from "@/lib/weeks";
 import { Filters } from "@/components/Filters";
-import { ReviewCard } from "@/components/ReviewCard";
+import { ReviewList } from "@/components/ReviewList";
 import { ReviewFilter } from "@/components/ReviewFilter";
 import { ReviewShowAll } from "@/components/ReviewShowAll";
 
@@ -112,9 +113,17 @@ export default async function ReviewPage({
   const filters = parseFilters(params);
   filters.sportLabel = sport;
 
-  const [{ rows, total }] = await Promise.all([
+  const [{ rows, total, hasMore }, validatableTotal] = await Promise.all([
     fetchReviewGames(filters, { showAll }),
+    countValidatableReviewGames(filters),
   ]);
+
+  // Querystring the infinite-scroll list re-uses to fetch further pages.
+  const listQuery = new URLSearchParams(params);
+  listQuery.delete("page");
+  listQuery.delete("offset");
+  if (showAll) listQuery.set("all", "1");
+  else listQuery.delete("all");
 
   return (
     <div className="space-y-5">
@@ -136,17 +145,14 @@ export default async function ReviewPage({
         showDivision={types.length > 1}
       />
 
-      {rows.length === 0 ? (
-        <p className="py-16 text-center text-white/40">
-          {showAll ? "No games match these filters." : "Nothing to review. 🎉"}
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {rows.map((game) => (
-            <ReviewCard key={game.id} game={game} />
-          ))}
-        </div>
-      )}
+      <ReviewList
+        key={listQuery.toString()}
+        initial={rows}
+        initialHasMore={hasMore}
+        query={listQuery.toString()}
+        showAll={showAll}
+        validatableTotal={validatableTotal}
+      />
     </div>
   );
 }

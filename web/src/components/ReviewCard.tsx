@@ -123,7 +123,18 @@ function VideoPreview({
   );
 }
 
-export function ReviewCard({ game }: { game: GameView }) {
+export function ReviewCard({
+  game,
+  onUpdated,
+  selected = false,
+  onToggleSelect,
+}: {
+  game: GameView;
+  onUpdated?: (game: GameView) => void;
+  selected?: boolean;
+  // Present when the card can be bulk-validated.
+  onToggleSelect?: (id: number) => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [refreshing, startTransition] = useTransition();
@@ -150,15 +161,19 @@ export function ReviewCard({ game }: { game: GameView }) {
   async function act(action: string, extra?: Record<string, unknown>) {
     setBusy(true);
     try {
-      await fetch("/api/review", {
+      const res = await fetch("/api/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: game.id, action, ...extra }),
       });
+      const data: { game?: GameView | null } = await res
+        .json()
+        .catch(() => ({}));
+      if (res.ok && data.game) onUpdated?.(data.game);
     } finally {
       setBusy(false);
     }
-    // Keep the card disabled until the refreshed server data has arrived.
+    // Refresh server data (e.g. the queue count); keep the card disabled until it arrives.
     startTransition(() => router.refresh());
   }
 
@@ -168,10 +183,28 @@ export function ReviewCard({ game }: { game: GameView }) {
     "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-40";
 
   return (
-    <div className="rounded-xl border border-[var(--input-border)] bg-[var(--surface)] p-4">
+    <div
+      className={`rounded-xl border bg-[var(--surface)] p-4 ${
+        selected
+          ? "border-emerald-500 ring-1 ring-emerald-500"
+          : "border-[var(--input-border)]"
+      }`}
+    >
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h3 className="truncate font-medium text-[var(--text)]">
-          {game.awayTeamName} @ {game.homeTeamName}
+        <h3 className="flex min-w-0 items-baseline gap-2 font-medium text-[var(--text)]">
+          {onToggleSelect ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(game.id)}
+              title="Select for bulk validation"
+              aria-label={`Select ${game.awayTeamName} @ ${game.homeTeamName}`}
+              className="h-4 w-4 shrink-0 cursor-pointer self-center accent-emerald-500"
+            />
+          ) : null}
+          <span className="truncate">
+            {game.awayTeamName} @ {game.homeTeamName}
+          </span>
         </h3>
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {shortSportLabel(game.conferenceType)} · {game.season}

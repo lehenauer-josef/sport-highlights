@@ -25,6 +25,7 @@ importer/
   import_nba_games.py     # ESPN NBA API -> Postgres (teams, games, stats + highlights)
   import_nfl_games.py     # nflverse + ESPN -> Postgres (games, stats + highlights)
   highlight_scorer.py     # shared YouTube highlight scorer (used by all importers)
+  records.py              # shared pregame W-L records (regular-season games only)
   requirements.txt        # psycopg
   .cfbd_key               # (optional) CFD API key file
 db/
@@ -101,6 +102,11 @@ Sport pages and the review queue offer team, season, week, highlights, and sorti
 controls, plus division/ranking filters for college football. Conference filtering
 is not available in the UI; legacy `conference` URL parameters are ignored on
 these pages. Conference details remain visible on games.
+
+The review queue loads more games as you scroll and supports bulk validation
+(same effect as "Keep current"): tick games and use "Validate selected", or
+"Validate all matching" to validate every unchecked game with a video that
+matches the current filters (rejected games are skipped).
 
 The Week dropdown lists only weeks and rounds with games in the selected season,
 grouped: "Regular Season" (Week 1…N, then "All" regular-season games,

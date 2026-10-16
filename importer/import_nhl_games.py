@@ -38,6 +38,7 @@ from urllib.request import Request, urlopen
 import psycopg
 
 import highlight_scorer as scorer
+from records import apply_pregame_records
 
 USER_AGENT = "nhl-highlights-importer/1.0"
 GAME_STORY_URL = "https://api-web.nhle.com/v1/wsc/game-story/{game_id}"
@@ -786,6 +787,7 @@ def main() -> None:
         )
 
         inserted = updated = skipped_future = highlights_found = 0
+        record_seasons: set[str] = set()
         no_highlight_examples = 0
 
         for game in games:
@@ -898,6 +900,8 @@ def main() -> None:
                 highlight_score,
             )
             row.update(fetch_game_stats(str(pick(game, "id"))) if completed else dict.fromkeys(STAT_COLUMNS))
+            if row["season"]:
+                record_seasons.add(row["season"])
             # Preserve manually reviewed rows when no new search result is chosen.
             if do_search or not existing:
                 row["highlights_valid"] = bool(video_id)
@@ -987,6 +991,12 @@ def main() -> None:
                 break
 
         if not args.dry_run:
+            conn.commit()
+            # Pregame W-L snapshots (regular-season games only) for the seasons touched.
+            for season in sorted(record_seasons):
+                records_updated = apply_pregame_records(conn, season)
+                if records_updated:
+                    print(f"Updated pregame records for {records_updated} games ({season}).", flush=True)
             conn.commit()
 
     print(

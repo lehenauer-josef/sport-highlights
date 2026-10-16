@@ -372,17 +372,23 @@ export async function fetchGames(
 
 // Games shown on the review queue. By default only unchecked highlights
 // (Highlights checked = false); showAll drops that restriction so already
-// checked games can be revisited. Honors the standard grid filters.
+// checked games can be revisited. Honors the standard grid filters. Paged by
+// offset: the queue asks for the next page starting at the number of cards it
+// shows, so cards removed after review don't shift later pages.
+export const REVIEW_PAGE_SIZE = 120;
+
 export async function fetchReviewGames(
   f: GameFilters,
-  opts: { showAll: boolean; limit?: number },
-): Promise<{ rows: GameView[]; total: number }> {
-  if (!f.sportLabel) return { rows: [], total: 0 };
+  opts: { showAll: boolean; offset?: number; limit?: number },
+): Promise<{ rows: GameView[]; total: number; hasMore: boolean }> {
+  if (!f.sportLabel) return { rows: [], total: 0, hasMore: false };
   const sportTypes = conferenceTypesForSport(f.sportLabel);
   const base = buildWhere(f, sportTypes);
   const where = opts.showAll
     ? base
     : and(base, eq(games.highlightsChecked, false))!;
+  const offset = Math.max(0, opts.offset ?? 0);
+  const limit = opts.limit ?? REVIEW_PAGE_SIZE;
 
   const [rows, countRes] = await Promise.all([
     db
@@ -392,7 +398,8 @@ export async function fetchReviewGames(
       .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
       .where(where)
       .orderBy(buildOrderBy(f))
-      .limit(opts.limit ?? 120),
+      .limit(limit)
+      .offset(offset),
     db
       .select({ n: sql<number>`count(*)::int` })
       .from(games)
@@ -401,7 +408,76 @@ export async function fetchReviewGames(
       .where(where),
   ]);
 
-  return { rows: rows as GameView[], total: countRes[0]?.n ?? 0 };
+  const total = countRes[0]?.n ?? 0;
+  return {
+    rows: rows as GameView[],
+    total,
+    hasMore: offset + rows.length < total,
+  };
+}
+
+// Games "Validate all" approves: unchecked, not rejected, with a highlight
+// video, and matching the queue's filters (regardless of "Show all").
+function validatableWhere(f: GameFilters): SQL | null {
+  if (!f.sportLabel) return null;
+  return and(
+    buildWhere(f, conferenceTypesForSport(f.sportLabel)),
+    eq(games.highlightsChecked, false),
+    isNotNull(games.videoId),
+    sql`${games.reviewStatus} is distinct from 'rejected'`,
+  )!;
+}
+
+export async function countValidatableReviewGames(f: GameFilters): Promise<number> {
+  const where = validatableWhere(f);
+  if (!where) return 0;
+  const [res] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(games)
+    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+    .where(where);
+  return res?.n ?? 0;
+}
+
+// Approve ("Keep current") many games at once: an explicit id list, or every
+// validatable game matching the filters. Only unchecked games with a video
+// are touched. Returns the ids that were validated.
+export async function validateReviewGames(
+  target: { ids: number[] } | { filters: GameFilters },
+): Promise<number[]> {
+  let where: SQL | undefined;
+  if ("ids" in target) {
+    if (!target.ids.length) return [];
+    where = and(
+      inArray(games.id, target.ids),
+      eq(games.highlightsChecked, false),
+      isNotNull(games.videoId),
+    );
+  } else {
+    const filtered = validatableWhere(target.filters);
+    if (!filtered) return [];
+    // The filters reference the joined team aliases, so select ids first.
+    where = inArray(
+      games.id,
+      db
+        .select({ id: games.id })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(filtered),
+    );
+  }
+  const updated = await db
+    .update(games)
+    .set({
+      reviewStatus: "approved",
+      highlightsValid: true,
+      highlightsChecked: true,
+    })
+    .where(where)
+    .returning({ id: games.id });
+  return updated.map((r) => r.id);
 }
 
 export async function fetchGameById(id: number): Promise<GameView | null> {  const rows = await db

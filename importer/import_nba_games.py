@@ -48,6 +48,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 import highlight_scorer as scorer
+from records import apply_pregame_records
 
 USER_AGENT = "nba-highlights-importer/1.0"
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
@@ -944,6 +945,7 @@ def main() -> None:
 
     inserted = updated = skipped_future = skipped_preseason = skipped_teams = 0
     highlights_found = no_highlight_examples = 0
+    record_seasons: set[str] = set()
 
     with psycopg.connect(db_url) as conn:
         by_ext: dict[str, int] = {}
@@ -1057,6 +1059,8 @@ def main() -> None:
             row = build_row(event, home_id, away_id, home_name, away_name, video_id, found_score)
             if completed:
                 row.update(fetch_game_stats(event_id))
+            if row["season"]:
+                record_seasons.add(row["season"])
 
             if args.dry_run:
                 inserted += 0 if existing else 1
@@ -1144,6 +1148,12 @@ def main() -> None:
                 break
 
         if not args.dry_run:
+            conn.commit()
+            # Pregame W-L snapshots (regular-season games only) for the seasons touched.
+            for season in sorted(record_seasons):
+                records_updated = apply_pregame_records(conn, season)
+                if records_updated:
+                    print(f"Updated pregame records for {records_updated} games ({season}).", flush=True)
             conn.commit()
 
     print(
