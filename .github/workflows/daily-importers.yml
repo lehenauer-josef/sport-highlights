@@ -1,11 +1,9 @@
 name: Daily Sports Importers
 
 on:
+  # Triggered daily by an external cron-job.org job via the GitHub API
+  # (GitHub's own `schedule` trigger started runs hours late).
   workflow_dispatch:
-  schedule:
-    # 04:17 UTC = 06:17 CEST (05:17 CET in winter). GitHub delays scheduled runs
-    # most at the top of the hour, so this deliberately uses an odd minute.
-    - cron: "17 3 * * *"
 
 permissions:
   contents: read

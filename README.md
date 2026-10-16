@@ -8,7 +8,8 @@ and find the best YouTube highlight video for each game.
 
 - **Web**: Next.js 15 (App Router), React 19, Tailwind CSS 4, Drizzle ORM; deployed on Vercel.
 - **Database**: hosted PostgreSQL on [Neon](https://neon.tech). Production, the
-  daily importers (GitHub Actions) and local development all use this database.
+  daily importers (GitHub Actions, triggered by [cron-job.org](https://console.cron-job.org/jobs/8656592))
+  and local development all use this database.
 - **Importers**: Python 3.9+ scripts in `importer/`.
 
 ## Project layout
@@ -28,7 +29,7 @@ importer/
   .cfbd_key               # (optional) CFD API key file
 db/
   migrations/             # SQL migrations already applied to the Neon database
-.github/workflows/        # daily importer run (04:17 UTC)
+.github/workflows/        # daily importer run (triggered by cron-job.org)
 ```
 
 ## Prerequisites
@@ -294,6 +295,37 @@ only and never searches for highlights. A missing ESPN ID, unavailable summary,
 or missing stat is logged (where the whole summary is unavailable) and does not
 erase previously imported stats. Older seasons need a backfill before stats
 appear; no database migration or ESPN API key is required.
+
+---
+
+### E. Daily import run (GitHub Actions + cron-job.org)
+
+[`.github/workflows/daily-importers.yml`](.github/workflows/daily-importers.yml)
+runs the CFB, NFL, NHL and NBA importers one after another with their default
+(recent-games) arguments. It has no GitHub `schedule` trigger, because GitHub
+started scheduled runs hours late. Instead, the
+[cron-job.org job](https://console.cron-job.org/jobs/8656592) triggers the workflow
+through the GitHub API once a day; the run time is set in that job (Europe/Vienna
+time zone).
+
+The cron-job.org job is configured as follows:
+
+| Setting                         | Value                                                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| URL                             | `https://api.github.com/repos/lehenauer-josef/sport-highlights/actions/workflows/daily-importers.yml/dispatches` |
+| Request method (Advanced tab)   | `POST`                                                                                                         |
+| Headers (Advanced tab)          | `Accept: application/vnd.github+json`, `Authorization: Bearer <token>`, `X-GitHub-Api-Version: 2022-11-28`, `Content-Type: application/json` |
+| Request body (Advanced tab)     | `{"ref":"main"}`                                                                                               |
+
+The token is a GitHub fine-grained personal access token limited to this
+repository, with only the **Actions: Read and write** permission. It expires, so
+when the job starts failing with `401`, create a new token
+([github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens))
+and replace it in the job's `Authorization` header. A successful trigger returns
+`204 No Content`. Never commit the token.
+
+To run the importers manually, use **Actions → Daily Sports Importers → Run
+workflow** on GitHub, or the cron-job.org job's test run.
 
 ---
 
