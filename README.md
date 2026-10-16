@@ -163,8 +163,9 @@ the best highlight, and upserts the result into Postgres.
 NHL does not provide numbered weeks, so the importer derives them as consecutive
 7-day blocks starting with the first regular-season game of each season. Running
 the importer again also fills in week numbers for existing NHL game records.
-The web app uses the same calculation for NHL records with no stored week, so
-existing data can be filtered without reimporting it. The Week dropdown selects
+The web app reads the stored `week` column directly (all existing NHL records
+have been backfilled), so games without a stored week do not match week filters.
+The Week dropdown selects
 one week or Postseason; All weeks removes the week restriction and preserves that
 choice rather than reapplying the default week.
 
@@ -221,9 +222,9 @@ NBA seasons are identified by their end year (`2026` = 2025-26). The NBA has no
 numbered weeks, so the importer derives them as consecutive 7-day blocks (US
 Eastern dates) starting on the first day of the regular season; postseason games
 continue the numbering. Running the importer again also fills in week numbers for
-existing NBA game records, and the web app uses the same calculation for NBA
-records with no stored week, so existing data can be filtered by week without
-reimporting it.
+existing NBA game records. The web app reads the stored `week` column directly
+(all existing NBA records have been backfilled), so games without a stored week
+do not match week filters.
 
 NBA and college teams share ESPN ids (e.g. `12` is both the LA Clippers and
 Arizona), so teams are identified by sport + id: `teams` has a unique key on

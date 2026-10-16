@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { youtubeThumb, youtubeUrl } from "@/lib/format";
 import { LocalDateTime } from "@/components/LocalDateTime";
@@ -18,25 +18,32 @@ function VideoPreview({
   accent: string;
 }) {
   const thumb = youtubeThumb(videoId);
-  // undefined = still loading, null = unavailable.
-  const [info, setInfo] = useState<YouTubeVideoInfo | null | undefined>(
-    undefined,
-  );
+  const [info, setInfo] = useState<YouTubeVideoInfo | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
+  // Reset when the video changes; info is only fetched on demand.
   useEffect(() => {
-    setInfo(undefined);
-    if (!videoId) return;
-    const ctrl = new AbortController();
-    fetch(`/api/youtube-video?v=${encodeURIComponent(videoId)}`, {
-      signal: ctrl.signal,
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: YouTubeVideoInfo | null) => setInfo(data))
-      .catch(() => {
-        if (!ctrl.signal.aborted) setInfo(null);
-      });
-    return () => ctrl.abort();
+    setInfo(null);
+    setFailed(false);
   }, [videoId]);
+
+  async function loadInfo() {
+    if (!videoId) return;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const res = await fetch(
+        `/api/youtube-video?v=${encodeURIComponent(videoId)}`,
+      );
+      if (!res.ok) throw new Error("failed");
+      setInfo((await res.json()) as YouTubeVideoInfo);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="flex-1">
@@ -77,10 +84,20 @@ function VideoPreview({
                   {info.views ? <span>· {info.views}</span> : null}
                 </div>
               </>
-            ) : info === undefined ? (
-              <span>Loading video info…</span>
             ) : (
-              <span>Video info unavailable</span>
+              <button
+                type="button"
+                onClick={loadInfo}
+                disabled={loading}
+                title="Load channel, duration and views from YouTube"
+                className="rounded bg-[var(--chip-strong)] px-2 py-0.5 text-[10px] text-[var(--text-muted)] transition hover:bg-[var(--surface-strong)] hover:text-[var(--text)] disabled:opacity-40"
+              >
+                {loading
+                  ? "Loading…"
+                  : failed
+                    ? "ⓘ Info unavailable – retry"
+                    : "ⓘ Load video info"}
+              </button>
             )}
           </div>
         </>
@@ -96,6 +113,7 @@ function VideoPreview({
 export function ReviewCard({ game }: { game: GameView }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [refreshing, startTransition] = useTransition();
   const [searchUrl, setSearchUrl] = useState<string | null>(null);
   const [results, setResults] = useState<YouTubeResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -118,14 +136,20 @@ export function ReviewCard({ game }: { game: GameView }) {
 
   async function act(action: string, extra?: Record<string, unknown>) {
     setBusy(true);
-    await fetch("/api/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: game.id, action, ...extra }),
-    });
-    setBusy(false);
-    router.refresh();
+    try {
+      await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: game.id, action, ...extra }),
+      });
+    } finally {
+      setBusy(false);
+    }
+    // Keep the card disabled until the refreshed server data has arrived.
+    startTransition(() => router.refresh());
   }
+
+  const pending = busy || refreshing;
 
   const btn =
     "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-40";

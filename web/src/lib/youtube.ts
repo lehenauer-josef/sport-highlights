@@ -72,22 +72,6 @@ function textOf(
   return joined || null;
 }
 
-function formatSeconds(total: number): string {
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
-
-function formatViews(count: number): string {
-  const n = new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(count);
-  return `${n} ${count === 1 ? "view" : "views"}`;
-}
-
 function collectVideos(
   node: unknown,
   out: YouTubeResult[],
@@ -163,55 +147,24 @@ export async function searchYouTube(
   return out.slice(0, limit);
 }
 
-type PlayerResponse = {
-  videoDetails?: {
-    title?: string;
-    author?: string;
-    lengthSeconds?: string;
-    viewCount?: string;
-  };
-};
-
-// Best-effort scrape of a single video's channel, duration and view count
-// from its watch page. Returns null if YouTube's markup can't be parsed.
+// Look up a single video's channel, duration and view count via a YouTube
+// search for its quoted id (the /results page is far less aggressively
+// rate-limited than /watch). Returns null if the video isn't found.
 export async function fetchVideoInfo(
   videoId: string,
 ): Promise<YouTubeVideoInfo | null> {
-  let html: string;
-  try {
-    const res = await fetch(
-      `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
-      { headers: FETCH_HEADERS, cache: "no-store" },
-    );
-    if (!res.ok) return null;
-    html = await res.text();
-  } catch {
-    return null;
-  }
-
-  const match = html.match(
-    /ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var\s|<\/script>)/s,
-  );
-  if (!match) return null;
-
-  let data: PlayerResponse;
-  try {
-    data = JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
-
-  const vd = data.videoDetails;
-  if (!vd) return null;
-  const seconds = Number(vd.lengthSeconds);
-  const views = Number(vd.viewCount);
+  const url =
+    "https://www.youtube.com/results?search_query=" +
+    encodeURIComponent(`"${videoId}"`);
+  const results = await searchYouTube(url, 5);
+  const hit = results.find((r) => r.videoId === videoId);
+  if (!hit) return null;
   return {
     videoId,
-    title: vd.title ?? null,
-    channel: vd.author ?? null,
-    duration: seconds > 0 ? formatSeconds(seconds) : null,
-    views:
-      vd.viewCount != null && Number.isFinite(views) ? formatViews(views) : null,
+    title: hit.title,
+    channel: hit.channel,
+    duration: hit.duration,
+    views: hit.views,
   };
 }
 
