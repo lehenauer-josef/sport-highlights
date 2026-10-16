@@ -131,7 +131,7 @@ export default async function ReviewPage({
         <h1 className="text-xl font-semibold">Review queue</h1>
         <div className="flex items-center gap-4">
           <ReviewShowAll showAll={showAll} />
-          <span className="text-sm text-white/50">
+          <span className="text-sm text-[var(--text-muted)]">
             {total} {showAll ? "games" : "to check"}
           </span>
         </div>

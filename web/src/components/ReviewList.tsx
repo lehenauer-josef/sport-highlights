@@ -185,7 +185,7 @@ export function ReviewList({
 
   if (rows.length === 0 && !hasMore) {
     return (
-      <p className="py-16 text-center text-white/40">
+      <p className="py-16 text-center text-[var(--text-subtle)]">
         {showAll ? "No games match these filters." : "Nothing to review. 🎉"}
       </p>
     );

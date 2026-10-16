@@ -16,7 +16,7 @@ export function ReviewShowAll({ showAll }: { showAll: boolean }) {
   }
 
   return (
-    <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-white/60">
+    <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-[var(--text-muted)]">
       <span>Show all</span>
       <button
         type="button"

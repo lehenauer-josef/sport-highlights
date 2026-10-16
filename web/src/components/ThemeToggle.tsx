@@ -39,9 +39,10 @@ export function ThemeToggle() {
       className="group inline-flex items-center"
     >
       <span className="relative inline-flex h-7 w-12 items-center rounded-full border border-[var(--border)] bg-[var(--surface-soft)] p-1 shadow-inner">
+        {/* The knob sits over its own track icon (☀ left, ☾ right), so one sun and one moon stay visible. */}
         <span
           className={`absolute left-1 h-5 w-5 rounded-full bg-gradient-to-br from-amber-200 to-yellow-400 text-[10px] shadow-sm transition-transform duration-200 ${
-            isDark ? "translate-x-0" : "translate-x-5"
+            isDark ? "translate-x-5" : "translate-x-0"
           }`}
           aria-hidden="true"
         >

@@ -108,7 +108,7 @@ export default async function SportPage({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{sportLabel}</h1>
-        <span className="text-sm text-white/50">{total} games</span>
+        <span className="text-sm text-[var(--text-muted)]">{total} games</span>
       </div>
 
       <Filters
