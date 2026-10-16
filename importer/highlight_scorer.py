@@ -70,6 +70,7 @@ TEAM_ALIASES = {
     "new york islanders": ["islanders", "isles"],
     "new york rangers": ["rangers"],
     "utah hockey club": ["utah", "utah hc", "utah hockey club", "utah utah hockey club"],
+    "utah mammoth": ["mammoth", "utah"],
     "ottawa senators": ["senators", "sens"],
     "philadelphia flyers": ["flyers"],
     "pittsburgh penguins": ["penguins", "pens"],
