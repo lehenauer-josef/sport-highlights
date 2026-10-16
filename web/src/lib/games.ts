@@ -480,6 +480,37 @@ export async function validateReviewGames(
   return updated.map((r) => r.id);
 }
 
+// The requested team names that exist for the sport (case-insensitive), in
+// their stored spelling, deduplicated and in request order. Used to drop
+// unknown teams from the URL.
+export async function resolveTeamNames(
+  names: string[],
+  sportTypes: string[],
+): Promise<string[]> {
+  if (!names.length || !sportTypes.length) return [];
+  const rows = await db
+    .selectDistinct({ name: teams.name })
+    .from(teams)
+    .where(
+      and(
+        inArray(
+          sql`lower(${teams.name})`,
+          names.map((n) => n.toLowerCase()),
+        ),
+        inArray(teams.conferenceType, sportTypes),
+      ),
+    );
+  const byLower = new Map(
+    rows.flatMap((r) => (r.name ? [[r.name.toLowerCase(), r.name] as const] : [])),
+  );
+  const resolved: string[] = [];
+  for (const n of names) {
+    const name = byLower.get(n.toLowerCase());
+    if (name && !resolved.includes(name)) resolved.push(name);
+  }
+  return resolved;
+}
+
 export async function fetchGameById(id: number): Promise<GameView | null> {  const rows = await db
     .select(gameColumns)
     .from(games)

@@ -116,7 +116,6 @@ export function Filters({
         value={params.get("season") ?? ""}
         onChange={(e) => update("season", e.target.value)}
       >
-        <option value="">All seasons</option>
         {options.seasons.map((s) => (
           <option key={s} value={s}>
             {s}

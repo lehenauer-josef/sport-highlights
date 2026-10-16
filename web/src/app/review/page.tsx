@@ -10,6 +10,7 @@ import {
   countValidatableReviewGames,
   fetchReviewGames,
   loadDefaultSeasonAndWeek,
+  resolveTeamNames,
   loadFilterOptions,
   parseFilters,
 } from "@/lib/games";
@@ -66,6 +67,33 @@ export default async function ReviewPage({
     loadFilterOptions(types),
     loadDefaultSeasonAndWeek(types),
   ]);
+
+  // Every view is scoped to one season; an empty or unknown season (e.g. an
+  // old "All seasons" link) falls back to the default season.
+  const requestedSeason = params.get("season");
+  if (
+    requestedSeason != null &&
+    !options.seasons.includes(requestedSeason) &&
+    defaultRange.season
+  ) {
+    params.set("season", defaultRange.season);
+    redirect(`/review?${params.toString()}`);
+  }
+
+  // Only known teams of this sport may filter; drop unknown names (e.g. typed
+  // into the URL) and normalize the spelling.
+  const requestedTeams = (params.get("team") ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (params.has("team")) {
+    const validTeams = await resolveTeamNames(requestedTeams, types);
+    if (!requestedTeams.length || validTeams.join(",") !== requestedTeams.join(",")) {
+      if (validTeams.length) params.set("team", validTeams.join(","));
+      else params.delete("team");
+      redirect(`/review?${params.toString()}`);
+    }
+  }
 
   if (!params.has("season") && defaultRange.season) {
     params.set("season", defaultRange.season);

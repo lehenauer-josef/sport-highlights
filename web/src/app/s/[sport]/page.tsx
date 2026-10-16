@@ -5,6 +5,7 @@ import { GameModal } from "@/components/GameModal";
 import {
   fetchGames,
   loadDefaultSeasonAndWeek,
+  resolveTeamNames,
   loadFilterOptions,
   parseFilters,
 } from "@/lib/games";
@@ -48,6 +49,33 @@ export default async function SportPage({
     loadFilterOptions(sportTypes),
     loadDefaultSeasonAndWeek(sportTypes),
   ]);
+
+  // Every view is scoped to one season; an empty or unknown season (e.g. an
+  // old "All seasons" link) falls back to the default season.
+  const requestedSeason = searchParamsObj.get("season");
+  if (
+    requestedSeason != null &&
+    !options.seasons.includes(requestedSeason) &&
+    defaultRange.season
+  ) {
+    searchParamsObj.set("season", defaultRange.season);
+    redirect(`/s/${slug}?${searchParamsObj.toString()}`);
+  }
+
+  // Only known teams of this sport may filter; drop unknown names (e.g. typed
+  // into the URL) and normalize the spelling.
+  const requestedTeams = (searchParamsObj.get("team") ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (searchParamsObj.has("team")) {
+    const validTeams = await resolveTeamNames(requestedTeams, sportTypes);
+    if (!requestedTeams.length || validTeams.join(",") !== requestedTeams.join(",")) {
+      if (validTeams.length) searchParamsObj.set("team", validTeams.join(","));
+      else searchParamsObj.delete("team");
+      redirect(`/s/${slug}?${searchParamsObj.toString()}`);
+    }
+  }
 
   if (!searchParamsObj.has("season") && defaultRange.season) {
     searchParamsObj.set("season", defaultRange.season);
