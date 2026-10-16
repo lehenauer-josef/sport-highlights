@@ -58,6 +58,8 @@ export const games = pgTable("games", {
   season: text("season"),
   week: integer("week"),
   type: text("type"),
+  // Postseason round key (e.g. "wild-card", "round-1", "cfp-semifinal", "bowl").
+  postseasonRound: text("postseason_round"),
   gameDate: timestamp("game_date", { withTimezone: true }),
   location: text("location"),
 
@@ -96,6 +98,7 @@ export const games = pgTable("games", {
   gamesAwayTeamIdx: index("games_away_team_idx").on(table.awayTeamId),
   gamesWeekIdx: index("games_week_idx").on(table.week),
   gamesTypeIdx: index("games_type_idx").on(table.type),
+  gamesPostseasonRoundIdx: index("games_postseason_round_idx").on(table.postseasonRound),
   gamesHighlightsCheckedIdx: index("games_highlights_checked_idx").on(table.highlightsChecked),
   gamesVideoIdIdx: index("games_video_id_idx").on(table.videoId),
 }));

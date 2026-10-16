@@ -9,7 +9,7 @@ import {
   parseFilters,
 } from "@/lib/games";
 import { conferenceTypesForSport, slugToSport } from "@/lib/sports";
-import { weeksAvailable } from "@/lib/weeks";
+import { fallbackWeek, weeksAvailable } from "@/lib/weeks";
 
 export const dynamic = "force-dynamic";
 
@@ -73,16 +73,23 @@ export default async function SportPage({
     redirect(`/s/${slug}?${searchParamsObj.toString()}`);
   }
 
-  // A week without games in the chosen season (e.g. an old link) falls back
-  // to "All weeks"; the default week is known to have games.
+  // A missing week or one without games in the chosen season (e.g. an old
+  // link) falls back to "All" regular-season (else postseason) games; the
+  // default week is known to have games.
   const season = searchParamsObj.get("season") ?? "";
   const week = searchParamsObj.get("week") ?? "";
   const weeks = week.split(",").map((w) => w.trim()).filter(Boolean);
   const isDefaultWeek =
     season === defaultRange.season && week === defaultRange.week;
-  if (!isDefaultWeek && !weeksAvailable(options, season, weeks)) {
-    searchParamsObj.set("week", "");
-    redirect(`/s/${slug}?${searchParamsObj.toString()}`);
+  if (
+    !isDefaultWeek &&
+    (!weeks.length || !weeksAvailable(options, season, weeks))
+  ) {
+    const fallback = fallbackWeek(options, season);
+    if (fallback && fallback !== week) {
+      searchParamsObj.set("week", fallback);
+      redirect(`/s/${slug}?${searchParamsObj.toString()}`);
+    }
   }
 
   const filters = parseFilters(searchParamsObj);

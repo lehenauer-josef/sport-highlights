@@ -6,6 +6,7 @@ import { youtubeThumb, youtubeUrl } from "@/lib/format";
 import { LocalDateTime } from "@/components/LocalDateTime";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
+import { weekLabel } from "@/lib/rounds";
 import type { YouTubeResult, YouTubeVideoInfo } from "@/lib/youtube";
 
 function VideoPreview({
@@ -163,7 +164,7 @@ export function ReviewCard({ game }: { game: GameView }) {
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {shortSportLabel(game.conferenceType)} · {game.season}
           {game.type === "postseason"
-            ? " · Postseason"
+            ? ` · ${weekLabel(game)}`
             : game.week
               ? ` · Wk ${game.week}`
               : ""}

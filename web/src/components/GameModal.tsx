@@ -11,6 +11,7 @@ import {
 } from "@/lib/format";
 import type { FormResult, GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
+import { weekLabel } from "@/lib/rounds";
 import { setShowResults, useShowResults } from "@/lib/prefs";
 import { FormList, loadForm } from "@/components/TeamForm";
 import { GameLeaders } from "@/components/GameLeaders";
@@ -403,7 +404,7 @@ export function GameModal() {
   if (game) {
     if (game.season) meta.push({ label: "Season", value: game.season });
     if (game.type === "postseason") {
-      meta.push({ label: "Week", value: "Postseason" });
+      meta.push({ label: "Round", value: weekLabel(game) ?? "Postseason" });
     } else if (game.week) {
       meta.push({ label: "Week", value: `Week ${game.week}` });
     }

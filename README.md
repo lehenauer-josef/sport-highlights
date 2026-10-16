@@ -76,7 +76,9 @@ Renames need a hand-written SQL migration instead (see `db/migrations/`), so
 `db:push` does not drop and recreate a column. Apply migrations with
 `psql "$DATABASE_URL" -f db/migrations/<file>.sql`. `0001` (already applied)
 renamed the legacy `airtable_id` key column of `teams` and `games` to
-`source_id` (the unique import key, e.g. `nfl:2024_15_BAL_NYG`).
+`source_id` (the unique import key, e.g. `nfl:2024_15_BAL_NYG`). `0002` (already
+applied) added `games.postseason_round`; existing postseason games were filled in
+once by a one-off backfill script (removed afterwards, see git history).
 
 ## 2. Start the web application
 
@@ -94,6 +96,32 @@ Sport pages and the review queue offer team, season, week, highlights, and sorti
 controls, plus division/ranking filters for college football. Conference filtering
 is not available in the UI; legacy `conference` URL parameters are ignored on
 these pages. Conference details remain visible on games.
+
+The Week dropdown lists only weeks and rounds with games in the selected season,
+grouped: "Regular Season" (Week 1…N, then "All" regular-season games,
+`week=regular`) and "Postseason" (the rounds, then "All" postseason games,
+`week=postseason`). College football splits the postseason into "Postseason –
+FBS" (`week=postseason-fbs` for its "All") and "Postseason – FCS"
+(`week=postseason-fcs`). There is no option for all games at once; a missing or
+unavailable week falls back to the regular-season "All" (or a postseason "All"
+if the season has no regular-season games). Week numbers match regular-season
+games only; postseason rounds are stored per game in `games.postseason_round` by
+the importers:
+
+| Sport | Rounds (`postseason_round` key) |
+| ----- | ------------------------------- |
+| College Football – FBS | Bowl Games (`bowl`), CFP 1st Round (`cfp-first-round`), CFP Quarterfinals (`cfp-quarterfinal`), CFP Semifinals (`cfp-semifinal`), National Championship (`cfp-championship`) |
+| College Football – FCS | Bowl Games (`fcs-bowl`, bowls between two FCS teams such as the Celebration Bowl), FCS 1st Round (`fcs-first-round`), FCS 2nd Round (`fcs-second-round`), FCS Quarterfinals (`fcs-quarterfinal`), FCS Semifinals (`fcs-semifinal`), FCS Championship (`fcs-championship`) |
+| NFL | Wild Card Playoffs (`wild-card`), Divisional Playoffs (`divisional`), Conference Championship (`conference`), Super Bowl (`super-bowl`) |
+| NHL | 1st Round (`round-1`), 2nd Round (`round-2`), Conference Finals (`conference-finals`), Stanley Cup Final (`finals`) |
+| NBA | Play-In (`play-in`), 1st Round (`round-1`), 2nd Round (`round-2`), Conference Finals (`conference-finals`), NBA Finals (`finals`) |
+
+The importers take the round from their source: CollegeFootballData game notes,
+the nflverse `game_type` (WC/DIV/CON/SB), the NHL schedule's `seriesStatus.round`,
+and the ESPN NBA competition type (play-in games are ESPN season type 5).
+CollegeFootballData lists the FCS playoff rounds before the semifinals as
+regular-season games; the importer stores every game whose notes name an
+"FCS Championship" round as `postseason`, so it no longer counts towards a week.
 
 > **Note:** never run `next build` while `next dev` is running — they share
 > `web/.next` and it can corrupt the dev build. If that happens, stop dev and run
@@ -130,7 +158,9 @@ Import a single week (recommended for a first run):
 python3 importer/import_games.py --season 2022 --week 4
 ```
 
-Import a whole season (walks the CFD calendar and imports every started week):
+Import a whole season (walks the CFD calendar and imports every started week, plus
+postseason weeks the calendar omits, e.g. the 2023 FCS playoff rounds listed as
+postseason weeks 13–15):
 
 ```bash
 python3 importer/import_games.py --season 2022
@@ -166,8 +196,8 @@ the importer again also fills in week numbers for existing NHL game records.
 The web app reads the stored `week` column directly (all existing NHL records
 have been backfilled), so games without a stored week do not match week filters.
 The Week dropdown selects
-one week or Postseason; All weeks removes the week restriction and preserves that
-choice rather than reapplying the default week.
+one week, all regular-season games, a single playoff round or all postseason
+games.
 
 Use the live `/now` endpoint by omitting `--season`, or import a historical
 season explicitly with an eight-digit season code such as `20232024`:

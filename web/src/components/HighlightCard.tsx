@@ -5,6 +5,7 @@ import { logoSrc, youtubeThumb, youtubeUrl } from "@/lib/format";
 import { LocalDateTime } from "@/components/LocalDateTime";
 import type { GameView } from "@/lib/games";
 import { shortSportLabel } from "@/lib/sports";
+import { weekLabel } from "@/lib/rounds";
 import { FormHover } from "@/components/TeamForm";
 
 function TeamLine({
@@ -139,7 +140,7 @@ export function HighlightCard({ game }: { game: GameView }) {
           <span>
             {game.season ? `${game.season}` : ""}
             {game.type === "postseason"
-              ? " · Postseason"
+              ? ` · ${weekLabel(game)}`
               : game.week
                 ? ` · Wk ${game.week}`
                 : ""}

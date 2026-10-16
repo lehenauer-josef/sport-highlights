@@ -14,6 +14,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { games, teams } from "@/db/schema";
 import { conferenceTypesForSport, slugToSport } from "@/lib/sports";
+import { groupFilterRounds, isRoundKey } from "@/lib/rounds";
 
 export const PAGE_SIZE = 24;
 
@@ -36,6 +37,7 @@ export const gameColumns = {
   season: games.season,
   week: games.week,
   type: games.type,
+  postseasonRound: games.postseasonRound,
   gameDate: games.gameDate,
   location: games.location,
   homePoints: games.homePoints,
@@ -84,6 +86,7 @@ export type GameView = {
   season: string | null;
   week: number | null;
   type: string | null;
+  postseasonRound: string | null;
   gameDate: Date | string | null;
   location: string | null;
   homePoints: number | null;
@@ -179,7 +182,12 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
     const sportTypes = sportTypesKey.split("|").filter(Boolean);
     const cutoff = new Date().toISOString();
     const rows = await db
-      .select({ season: games.season, week: games.week, type: games.type })
+      .select({
+        season: games.season,
+        week: games.week,
+        type: games.type,
+        postseasonRound: games.postseasonRound,
+      })
       .from(games)
       .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
       .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
@@ -197,15 +205,18 @@ const cachedDefaultSeasonAndWeek = unstable_cache(
       .limit(1);
 
     const season = rows[0]?.season ?? null;
+    // Like the latest week, default to the latest round during the postseason.
     const week =
-      rows[0]?.type === "postseason" ? "postseason" : (rows[0]?.week ?? null);
+      rows[0]?.type === "postseason"
+        ? (rows[0].postseasonRound ?? "postseason")
+        : (rows[0]?.week ?? null);
 
     return {
       season,
       week: week == null ? null : String(week),
     };
   },
-  ["default-season-week-regular-weeks"],
+  ["default-season-week-postseason-groups"],
   { revalidate: 900 },
 );
 
@@ -249,12 +260,30 @@ function buildWhere(f: GameFilters, sportTypes: string[]): SQL {
     .filter((w) => /^\d+$/.test(w))
     .map((w) => Number(w));
   const wantPostseason = f.weeks.includes("postseason");
-  if (weekNums.length || wantPostseason) {
+  const wantRegular = f.weeks.includes("regular");
+  const rounds = f.weeks.filter(isRoundKey);
+  const groupRounds = f.weeks.flatMap((w) => groupFilterRounds(w) ?? []);
+  if (
+    weekNums.length ||
+    wantPostseason ||
+    wantRegular ||
+    rounds.length ||
+    groupRounds.length
+  ) {
     const parts: SQL[] = [];
     if (weekNums.length) {
       parts.push(and(inArray(games.week, weekNums), notPostseason)!);
     }
+    if (wantRegular) parts.push(notPostseason);
     if (wantPostseason) parts.push(isPostseason);
+    if (rounds.length) {
+      parts.push(and(isPostseason, inArray(games.postseasonRound, rounds))!);
+    }
+    if (groupRounds.length) {
+      parts.push(
+        and(isPostseason, inArray(games.postseasonRound, groupRounds))!,
+      );
+    }
     conditions.push(or(...parts)!);
   }
 
@@ -329,7 +358,7 @@ const cachedFetchGames = unstable_cache(
       hasMore: filters.page * PAGE_SIZE < total,
     };
   },
-  ["games-list-regular-weeks"],
+  ["games-list-postseason-groups"],
   { revalidate: 60 },
 );
 
@@ -489,6 +518,8 @@ export async function fetchTeamForm(gameId: number): Promise<TeamForm> {
 export type WeekOptions = {
   weeks: number[];
   hasPostseason: boolean;
+  // Postseason round keys with games (see lib/rounds.ts).
+  rounds: string[];
 };
 
 export type FilterOptions = WeekOptions & {
@@ -527,7 +558,7 @@ const cachedFilterOptions = unstable_cache(
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
         .where(and(gameScope, notPostseason, isNotNull(games.week))),
       db
-        .selectDistinct({ season: games.season })
+        .selectDistinct({ season: games.season, round: games.postseasonRound })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
@@ -536,15 +567,19 @@ const cachedFilterOptions = unstable_cache(
 
     const bySeason: Record<string, WeekOptions> = {};
     const forSeason = (season: string) =>
-      (bySeason[season] ??= { weeks: [], hasPostseason: false });
+      (bySeason[season] ??= { weeks: [], hasPostseason: false, rounds: [] });
     const allWeeks = new Set<number>();
+    const allRounds = new Set<string>();
     for (const { season, week } of weeks) {
       if (week == null) continue;
       allWeeks.add(week);
       if (season) forSeason(season).weeks.push(week);
     }
-    for (const { season } of post) {
-      if (season) forSeason(season).hasPostseason = true;
+    for (const { season, round } of post) {
+      if (round) allRounds.add(round);
+      if (!season) continue;
+      forSeason(season).hasPostseason = true;
+      if (round) forSeason(season).rounds.push(round);
     }
     for (const opts of Object.values(bySeason)) {
       opts.weeks.sort((a, b) => a - b);
@@ -556,9 +591,10 @@ const cachedFilterOptions = unstable_cache(
         .filter((v): v is string => Boolean(v)),
       weeks: [...allWeeks].sort((a, b) => a - b),
       hasPostseason: post.length > 0,
+      rounds: [...allRounds],
       bySeason,
     };
   },
-  ["filter-options-weeks-by-season"],
+  ["filter-options-postseason-groups"],
   { revalidate: 1800 },
 );

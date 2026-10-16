@@ -164,7 +164,33 @@ def fetch_weeks(key: str, season: int, now: datetime):
             weeks.append((season_type, week))
     if not weeks:
         weeks = [("regular", n) for n in range(1, 17)] + [("postseason", 1)]
-    return weeks
+    return weeks + extra_postseason_weeks(key, season, now, weeks)
+
+
+def extra_postseason_weeks(key: str, season: int, now: datetime, known: list):
+    """Postseason weeks with started games that the CFD calendar doesn't list.
+
+    Some seasons (e.g. 2023) list the early FCS playoff rounds as postseason
+    weeks 13-15 while the calendar only has postseason week 1, so those games
+    would never be fetched week by week.
+    """
+    have = {week for season_type, week in known if season_type == "postseason"}
+    extra = set()
+    for classification in CLASSIFICATIONS:
+        try:
+            rows = cfbd_get("games", key, year=season, seasonType="postseason",
+                            classification=classification)
+        except SystemExit as exc:
+            print(f"  postseason week lookup failed ({exc}).", flush=True)
+            continue
+        for game in rows or []:
+            week = to_int(pick(game, "week"))
+            start = parse_dt(pick(game, "startDate", "start_date"))
+            if week is not None and week not in have and start and start <= now:
+                extra.add(week)
+    if extra:
+        print(f"  postseason weeks missing from the calendar: {sorted(extra)}", flush=True)
+    return [("postseason", week) for week in sorted(extra)]
 
 
 def fetch_games(key: str, season: int, season_type: str, week: int):
@@ -314,15 +340,68 @@ def to_int_list(value):
     return None
 
 
+FCS_PLAYOFF_ROUNDS = (
+    ("first round", "fcs-first-round"),
+    ("second round", "fcs-second-round"),
+    ("quarterfinal", "fcs-quarterfinal"),
+    ("semifinal", "fcs-semifinal"),
+)
+
+
+def fcs_playoff_round(notes: str) -> str | None:
+    """FCS bracket round from CFD notes ("FCS Championship - First Round", ...).
+
+    CFD lists the early FCS rounds as regular-season games, so this is checked
+    regardless of the game's seasonType.
+    """
+    if "fcs championship" not in notes and "division i football championship" not in notes:
+        return None
+    for needle, key in FCS_PLAYOFF_ROUNDS:
+        if needle in notes:
+            return key
+    return "fcs-championship"
+
+
+def cfb_postseason_round(game: dict) -> str | None:
+    """Postseason round key from the CFD game notes; non-playoff games are bowls."""
+    notes = str(pick(game, "notes", default="") or "").lower()
+    fcs_round = fcs_playoff_round(notes)
+    if fcs_round:
+        return fcs_round
+    if pick(game, "seasonType", "season_type", default="regular") != "postseason":
+        return None
+    if "college football playoff" in notes or re.search(r"\bcfp\b", notes):
+        if "first round" in notes:
+            return "cfp-first-round"
+        if "quarterfinal" in notes:
+            return "cfp-quarterfinal"
+        if "semifinal" in notes:
+            return "cfp-semifinal"
+        if "championship" in notes:
+            return "cfp-championship"
+    # Bowls between two FCS teams (e.g. the Celebration Bowl) belong to FCS.
+    home = str(pick(game, "homeClassification", "home_classification", default="") or "")
+    away = str(pick(game, "awayClassification", "away_classification", default="") or "")
+    if home.lower() == "fcs" and away.lower() == "fcs":
+        return "fcs-bowl"
+    return "bowl"
+
+
 def game_row(game: dict) -> dict:
     home = pick(game, "homeTeam", "home_team")
     away = pick(game, "awayTeam", "away_team")
+    postseason_round = cfb_postseason_round(game)
     return {
         "external_id": str(pick(game, "id")),
         "name": f"{away} at {home}" if home and away else None,
         "season": str(pick(game, "season", default="")) or None,
         "week": to_int(pick(game, "week")),
-        "type": pick(game, "seasonType", "season_type", default="regular"),
+        # FCS playoff rounds come back as regular-season games; store every
+        # bracket game as postseason.
+        "type": "postseason"
+        if postseason_round
+        else pick(game, "seasonType", "season_type", default="regular"),
+        "postseason_round": postseason_round,
         "location": pick(game, "venue"),
         "home_points": to_int(pick(game, "homePoints", "home_points")),
         "away_points": to_int(pick(game, "awayPoints", "away_points")),
@@ -390,13 +469,14 @@ def apply_pregame_records(conn, season: int) -> int:
 
 INSERT_SQL = """
 INSERT INTO games (
-    source_id, external_id, name, season, week, type, game_date, location,
+    source_id, external_id, name, season, week, type, postseason_round, game_date, location,
     home_team_id, away_team_id, home_points, away_points, home_line_scores,
     away_line_scores, home_team_stats, away_team_stats, game_leaders, home_rank, away_rank,
     home_record, away_record,
     excitement_index, video_id, highlights_valid, highlights_checked, review_status
 ) VALUES (
     %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
+    %(postseason_round)s,
     %(game_date)s, %(location)s, %(home_team_id)s, %(away_team_id)s,
     %(home_points)s, %(away_points)s, %(home_line_scores)s, %(away_line_scores)s,
     %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s, %(home_rank)s, %(away_rank)s,
@@ -1030,6 +1110,7 @@ def main() -> None:
                 elif existing:
                     sets = [
                         "name = %s", "season = %s", "week = %s", "type = %s",
+                        "postseason_round = %s",
                         "game_date = %s", "location = %s", "home_team_id = %s",
                         "away_team_id = %s", "home_points = %s", "away_points = %s",
                         "home_line_scores = %s", "away_line_scores = %s",
@@ -1040,6 +1121,7 @@ def main() -> None:
                     ]
                     vals = [
                         row["name"], row["season"], row["week"], row["type"],
+                        row["postseason_round"],
                         row["game_date"], row["location"], row["home_team_id"],
                         row["away_team_id"], row["home_points"], row["away_points"],
                         row["home_line_scores"], row["away_line_scores"],

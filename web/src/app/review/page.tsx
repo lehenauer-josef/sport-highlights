@@ -12,7 +12,7 @@ import {
   loadFilterOptions,
   parseFilters,
 } from "@/lib/games";
-import { weeksAvailable } from "@/lib/weeks";
+import { fallbackWeek, weeksAvailable } from "@/lib/weeks";
 import { Filters } from "@/components/Filters";
 import { ReviewCard } from "@/components/ReviewCard";
 import { ReviewFilter } from "@/components/ReviewFilter";
@@ -90,16 +90,23 @@ export default async function ReviewPage({
     redirect(`/review?${params.toString()}`);
   }
 
-  // A week without games in the chosen season (e.g. an old link) falls back
-  // to "All weeks"; the default week is known to have games.
+  // A missing week or one without games in the chosen season (e.g. an old
+  // link) falls back to "All" regular-season (else postseason) games; the
+  // default week is known to have games.
   const season = params.get("season") ?? "";
   const week = params.get("week") ?? "";
   const weeks = week.split(",").map((w) => w.trim()).filter(Boolean);
   const isDefaultWeek =
     season === defaultRange.season && week === defaultRange.week;
-  if (!isDefaultWeek && !weeksAvailable(options, season, weeks)) {
-    params.set("week", "");
-    redirect(`/review?${params.toString()}`);
+  if (
+    !isDefaultWeek &&
+    (!weeks.length || !weeksAvailable(options, season, weeks))
+  ) {
+    const fallback = fallbackWeek(options, season);
+    if (fallback && fallback !== week) {
+      params.set("week", fallback);
+      redirect(`/review?${params.toString()}`);
+    }
   }
 
   const filters = parseFilters(params);

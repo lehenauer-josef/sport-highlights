@@ -64,6 +64,7 @@ ESPN_SEASON_TYPE_URL = (
 # ESPN season types: 1 = preseason, 2 = regular season, 3 = postseason, 5 = play-in.
 PRESEASON_TYPE = 1
 REGULAR_SEASON_TYPE = 2
+PLAY_IN_TYPE = 5
 # Game days and week blocks follow the US schedule rather than UTC.
 LOCAL_TZ = ZoneInfo("America/New_York")
 PREFERRED_CHANNEL = "gametime highlights"
@@ -779,6 +780,44 @@ def load_team_map(conn) -> dict[str, int]:
     return by_ext
 
 
+# ESPN competition type per playoff round (RD16 = first round, QTR = conference
+# semifinals, SEMI = conference finals, FINAL = NBA Finals).
+PLAYOFF_ROUND_BY_TYPE = {
+    "RD16": "round-1",
+    "QTR": "round-2",
+    "SEMI": "conference-finals",
+    "FINAL": "finals",
+}
+PLAYOFF_ROUND_BY_HEADLINE = (
+    ("nba finals", "finals"),
+    ("conf finals", "conference-finals"),
+    ("east finals", "conference-finals"),
+    ("west finals", "conference-finals"),
+    ("semifinals", "round-2"),
+    ("1st round", "round-1"),
+    ("first round", "round-1"),
+)
+
+
+def nba_postseason_round(season_type: int | None, comp: dict) -> str | None:
+    """Postseason round key ("play-in", "round-1", ..., "finals"), else None."""
+    if season_type == PLAY_IN_TYPE:
+        return "play-in"
+    if season_type == REGULAR_SEASON_TYPE or season_type == PRESEASON_TYPE:
+        return None
+    abbrev = str(pick(pick(comp, "type", default={}) or {}, "abbreviation") or "").upper()
+    if abbrev in PLAYOFF_ROUND_BY_TYPE:
+        return PLAYOFF_ROUND_BY_TYPE[abbrev]
+    for note in pick(comp, "notes", default=[]) or []:
+        headline = str(pick(note, "headline", default="") or "").lower()
+        if "play-in" in headline:
+            return "play-in"
+        for needle, key in PLAYOFF_ROUND_BY_HEADLINE:
+            if needle in headline:
+                return key
+    return None
+
+
 def build_row(
     event: dict,
     home_id: int | None,
@@ -796,6 +835,7 @@ def build_row(
     status = pick(comp, "status", default={}) or pick(event, "status", default={})
     period = to_int(pick(status, "period")) or 0
     week = nba_week_number(game_date, regular_season_start(season_year)) if season_year else None
+    season_type = to_int(pick(season, "type"))
 
     return {
         "source_id": f"nba:{event_id}",
@@ -804,7 +844,8 @@ def build_row(
         "season": str(season_year) if season_year else None,
         "week": week,
         # Everything after the regular season (incl. play-in) is postseason.
-        "type": "regular" if to_int(pick(season, "type")) == REGULAR_SEASON_TYPE else "postseason",
+        "type": "regular" if season_type == REGULAR_SEASON_TYPE else "postseason",
+        "postseason_round": nba_postseason_round(season_type, comp),
         "game_date": game_date,
         "location": pick(pick(comp, "venue", default={}), "fullName"),
         "home_team_id": home_id,
@@ -1019,6 +1060,7 @@ def main() -> None:
                     "season = %s",
                     "week = %s",
                     "type = %s",
+                    "postseason_round = %s",
                     "game_date = %s",
                     "location = %s",
                     "home_team_id = %s",
@@ -1038,6 +1080,7 @@ def main() -> None:
                     row["season"],
                     row["week"],
                     row["type"],
+                    row["postseason_round"],
                     row["game_date"],
                     row["location"],
                     row["home_team_id"],
@@ -1064,7 +1107,8 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            source_id, external_id, name, season, week, type, game_date,
+                            source_id, external_id, name, season, week, type, postseason_round,
+                            game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
@@ -1072,7 +1116,8 @@ def main() -> None:
                             away_team_stats, game_leaders
                         ) VALUES (
                             %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
-                            %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
+                            %(type)s, %(postseason_round)s, %(game_date)s, %(location)s,
+                            %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,

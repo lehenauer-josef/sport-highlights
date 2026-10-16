@@ -640,6 +640,20 @@ def nhl_week_number(game_date: datetime | None, season_start: datetime | None) -
     return (game_date.date() - season_start.date()).days // 7 + 1
 
 
+# NHL playoff round number (seriesStatus.round) -> postseason round key.
+POSTSEASON_ROUND_BY_NUMBER = {
+    1: "round-1",
+    2: "round-2",
+    3: "conference-finals",
+    4: "finals",
+}
+
+
+def nhl_postseason_round(game: dict) -> str | None:
+    series = pick(game, "seriesStatus", default={}) or {}
+    return POSTSEASON_ROUND_BY_NUMBER.get(to_int(pick(series, "round")))
+
+
 def build_row(
     game: dict,
     season_label: str,
@@ -663,6 +677,7 @@ def build_row(
         "season": normalize_nhl_season(season_label),
         "week": nhl_week_number(game_date, season_start),
         "type": "regular" if game_type == 2 else "postseason",
+        "postseason_round": nhl_postseason_round(game) if game_type == 3 else None,
         "game_date": game_date,
         "location": pick(pick(game, "venue", default={}), "default"),
         "home_team_id": home_id,
@@ -895,6 +910,7 @@ def main() -> None:
                     "season = %s",
                     "week = %s",
                     "type = %s",
+                    "postseason_round = %s",
                     "game_date = %s",
                     "location = %s",
                     "home_team_id = %s",
@@ -912,6 +928,7 @@ def main() -> None:
                     row["season"],
                     row["week"],
                     row["type"],
+                    row["postseason_round"],
                     row["game_date"],
                     row["location"],
                     row["home_team_id"],
@@ -935,14 +952,16 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            source_id, external_id, name, season, week, type, game_date,
+                            source_id, external_id, name, season, week, type, postseason_round,
+                            game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
                             overtime, thumbnail_url, video_id, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
                             modified, home_team_stats, away_team_stats, game_leaders
                         ) VALUES (
                             %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s,
-                            %(type)s, %(game_date)s, %(location)s, %(home_team_id)s,
+                            %(type)s, %(postseason_round)s, %(game_date)s, %(location)s,
+                            %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
                             %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,

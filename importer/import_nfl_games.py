@@ -527,15 +527,29 @@ def choose_highlight(
     return (best.get("video_id") if best else None), videos
 
 
+# nflverse game_type per playoff round.
+POSTSEASON_ROUND_BY_GAME_TYPE = {
+    "WC": "wild-card",
+    "DIV": "divisional",
+    "CON": "conference",
+    "SB": "super-bowl",
+}
+
+
 def game_type_from_csv(value: str | None) -> str | None:
     raw = (value or "").strip().upper()
     if raw == "REG":
         return "regular"
-    if raw == "POST":
+    # nflverse marks playoff games by round (WC/DIV/CON/SB) rather than "POST".
+    if raw == "POST" or raw in POSTSEASON_ROUND_BY_GAME_TYPE:
         return "postseason"
     if raw == "PRE":
         return "preseason"
     return raw.lower() or None
+
+
+def postseason_round_from_csv(value: str | None) -> str | None:
+    return POSTSEASON_ROUND_BY_GAME_TYPE.get((value or "").strip().upper())
 
 
 def game_row(
@@ -557,6 +571,7 @@ def game_row(
         "season": str(season) if season is not None else None,
         "week": to_int(pick(game, "week")),
         "type": game_type_from_csv(pick(game, "game_type", "season_type", "type")),
+        "postseason_round": postseason_round_from_csv(pick(game, "game_type")),
         "game_date": gameday,
         "location": pick(game, "stadium", "location", "venue"),
         "home_team_id": home_id,
@@ -824,6 +839,7 @@ def main() -> None:
                     "season = %s",
                     "week = %s",
                     "type = %s",
+                    "postseason_round = %s",
                     "game_date = %s",
                     "location = %s",
                     "home_team_id = %s",
@@ -850,6 +866,7 @@ def main() -> None:
                     row["season"],
                     row["week"],
                     row["type"],
+                    row["postseason_round"],
                     row["game_date"],
                     row["location"],
                     row["home_team_id"],
@@ -885,7 +902,8 @@ def main() -> None:
                     cur.execute(
                         """
                         INSERT INTO games (
-                            source_id, external_id, name, season, week, type, game_date, location,
+                            source_id, external_id, name, season, week, type, postseason_round,
+                            game_date, location,
                             home_team_id, away_team_id, home_points, away_points, home_line_scores,
                             away_line_scores, home_team_stats, away_team_stats, game_leaders,
                             home_rank, away_rank, home_record, away_record, overtime,
@@ -893,6 +911,7 @@ def main() -> None:
                             highlights_checked, better_video_id, reason, review_status, modified
                         ) VALUES (
                             %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
+                            %(postseason_round)s,
                             %(game_date)s, %(location)s, %(home_team_id)s, %(away_team_id)s,
                             %(home_points)s, %(away_points)s, %(home_line_scores)s,
                             %(away_line_scores)s, %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s,

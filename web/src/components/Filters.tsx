@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TeamSearch } from "@/components/TeamSearch";
 import type { FilterOptions } from "@/lib/games";
-import { weekOptionsFor, weeksAvailable } from "@/lib/weeks";
+import { postseasonGroups } from "@/lib/rounds";
+import { slugToSport } from "@/lib/sports";
+import { fallbackWeek, weekOptionsFor, weeksAvailable } from "@/lib/weeks";
 
 function splitList(value: string | null): string[] {
   return (value ?? "")
@@ -38,10 +40,10 @@ export function Filters({
     apply((next) => {
       if (value || key === "week") next.set(key, value);
       else next.delete(key);
-      // Fall back to "All weeks" when the new season lacks the chosen week.
+      // Fall back to "All" when the new season lacks the chosen week.
       if (key === "season") {
         if (!weeksAvailable(options, value, splitList(next.get("week")))) {
-          next.set("week", "");
+          next.set("week", fallbackWeek(options, value) ?? "");
         }
       }
     });
@@ -63,12 +65,30 @@ export function Filters({
     .filter((k) => params.get(k)).length;
 
   const seasonWeeks = weekOptionsFor(options, params.get("season") ?? "");
-  const weekOptions = [
-    ...seasonWeeks.weeks.map((w) => ({ value: String(w), label: `Week ${w}` })),
+  const weekGroups = [
+    {
+      label: "Regular Season",
+      options: seasonWeeks.weeks.length
+        ? [
+            ...seasonWeeks.weeks.map((w) => ({
+              value: String(w),
+              label: `Week ${w}`,
+            })),
+            { value: "regular", label: "All" },
+          ]
+        : [],
+    },
     ...(seasonWeeks.hasPostseason
-      ? [{ value: "postseason", label: "Postseason" }]
-      : []),
-  ];
+      ? postseasonGroups(slugToSport(sportSlug), seasonWeeks.rounds)
+      : []
+    ).map((group) => ({
+      label: group.label,
+      options: [
+        ...group.rounds.map((r) => ({ value: r.key, label: r.label })),
+        { value: group.value, label: "All" },
+      ],
+    })),
+  ].filter((g) => g.options.length);
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -103,18 +123,21 @@ export function Filters({
           </option>
         ))}
       </select>
-      {weekOptions.length ? (
+      {weekGroups.length ? (
         <select
           aria-label="Week"
           className={select}
           value={week}
           onChange={(e) => update("week", e.target.value)}
         >
-          <option value="">All weeks</option>
-          {weekOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
+          {weekGroups.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       ) : null}
