@@ -63,3 +63,35 @@ select {
   transition: color 0.2s ease, background-color 0.2s ease,
     border-color 0.2s ease, transform 0.2s ease;
 }
+
+/* Pointer cursor on everything clickable (Tailwind v4 resets buttons to the
+   default cursor). In @layer base so utilities like cursor-help still win. */
+@layer base {
+  a[href],
+  button:not(:disabled),
+  [role="button"],
+  [role="switch"],
+  [role="option"],
+  [role="tab"],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="range"]:not(:disabled),
+  input[type="color"]:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="button"]:not(:disabled),
+  input[type="reset"]:not(:disabled),
+  label:has(> input[type="checkbox"]:not(:disabled)),
+  label:has(> input[type="radio"]:not(:disabled)),
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
