@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TeamSearch } from "@/components/TeamSearch";
 import type { FilterOptions } from "@/lib/games";
+import { weekOptionsFor, weeksAvailable } from "@/lib/weeks";
 
 function splitList(value: string | null): string[] {
   return (value ?? "")
@@ -37,6 +38,12 @@ export function Filters({
     apply((next) => {
       if (value || key === "week") next.set(key, value);
       else next.delete(key);
+      // Fall back to "All weeks" when the new season lacks the chosen week.
+      if (key === "season") {
+        if (!weeksAvailable(options, value, splitList(next.get("week")))) {
+          next.set("week", "");
+        }
+      }
     });
   }
 
@@ -55,9 +62,10 @@ export function Filters({
   const activeCount = ["season", "week", "division", "highlights"]
     .filter((k) => params.get(k)).length;
 
+  const seasonWeeks = weekOptionsFor(options, params.get("season") ?? "");
   const weekOptions = [
-    ...options.weeks.map((w) => ({ value: String(w), label: `Week ${w}` })),
-    ...(options.hasPostseason
+    ...seasonWeeks.weeks.map((w) => ({ value: String(w), label: `Week ${w}` })),
+    ...(seasonWeeks.hasPostseason
       ? [{ value: "postseason", label: "Postseason" }]
       : []),
   ];

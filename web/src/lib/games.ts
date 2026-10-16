@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   or,
   sql,
   type SQL,
@@ -485,10 +486,15 @@ export async function fetchTeamForm(gameId: number): Promise<TeamForm> {
   return { home, away };
 }
 
-export type FilterOptions = {
-  seasons: string[];
+export type WeekOptions = {
   weeks: number[];
   hasPostseason: boolean;
+};
+
+export type FilterOptions = WeekOptions & {
+  seasons: string[];
+  // Week choices per season; the top-level weeks cover all seasons.
+  bySeason: Record<string, WeekOptions>;
 };
 
 // Season/week choices limited to the current sport.
@@ -515,30 +521,44 @@ const cachedFilterOptions = unstable_cache(
         .where(gameScope)
         .orderBy(desc(games.season)),
       db
-        .selectDistinct({ v: games.week })
+        .selectDistinct({ season: games.season, week: games.week })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
-        .where(and(gameScope, notPostseason)),
+        .where(and(gameScope, notPostseason, isNotNull(games.week))),
       db
-        .select({ n: sql<number>`count(*)::int` })
+        .selectDistinct({ season: games.season })
         .from(games)
         .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
         .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
         .where(and(gameScope, isPostseason)),
     ]);
 
+    const bySeason: Record<string, WeekOptions> = {};
+    const forSeason = (season: string) =>
+      (bySeason[season] ??= { weeks: [], hasPostseason: false });
+    const allWeeks = new Set<number>();
+    for (const { season, week } of weeks) {
+      if (week == null) continue;
+      allWeeks.add(week);
+      if (season) forSeason(season).weeks.push(week);
+    }
+    for (const { season } of post) {
+      if (season) forSeason(season).hasPostseason = true;
+    }
+    for (const opts of Object.values(bySeason)) {
+      opts.weeks.sort((a, b) => a - b);
+    }
+
     return {
       seasons: seasons
         .map((r) => r.v)
         .filter((v): v is string => Boolean(v)),
-      weeks: weeks
-        .map((r) => r.v)
-        .filter((v): v is number => v != null)
-        .sort((a, b) => a - b),
-      hasPostseason: (post[0]?.n ?? 0) > 0,
+      weeks: [...allWeeks].sort((a, b) => a - b),
+      hasPostseason: post.length > 0,
+      bySeason,
     };
   },
-  ["filter-options-regular-weeks"],
+  ["filter-options-weeks-by-season"],
   { revalidate: 1800 },
 );

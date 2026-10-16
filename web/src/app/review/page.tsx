@@ -3,6 +3,7 @@ import {
   conferenceTypesForSport,
   DEFAULT_REVIEW_SPORT,
   REVIEW_SPORTS,
+  slugToSport,
   sportToSlug,
 } from "@/lib/sports";
 import {
@@ -11,6 +12,7 @@ import {
   loadFilterOptions,
   parseFilters,
 } from "@/lib/games";
+import { weeksAvailable } from "@/lib/weeks";
 import { Filters } from "@/components/Filters";
 import { ReviewCard } from "@/components/ReviewCard";
 import { ReviewFilter } from "@/components/ReviewFilter";
@@ -41,9 +43,16 @@ export default async function ReviewPage({
 }) {
   const sp = await searchParams;
   const rawSport = Array.isArray(sp.sport) ? sp.sport[0] : sp.sport;
-  const sport =
-    rawSport && REVIEW_SPORTS.includes(rawSport)
+  // Accept the tab label ("NBA") as well as the slug ("nba") that this page
+  // writes into its own redirects.
+  const requested = rawSport
+    ? REVIEW_SPORTS.includes(rawSport)
       ? rawSport
+      : slugToSport(rawSport)
+    : null;
+  const sport =
+    requested && REVIEW_SPORTS.includes(requested)
+      ? requested
       : DEFAULT_REVIEW_SPORT;
   const sportSlug = sportToSlug(sport) ?? "college-football";
   const types = conferenceTypesForSport(sport);
@@ -78,6 +87,18 @@ export default async function ReviewPage({
     defaultRange.season &&
     defaultRange.week
   ) {
+    redirect(`/review?${params.toString()}`);
+  }
+
+  // A week without games in the chosen season (e.g. an old link) falls back
+  // to "All weeks"; the default week is known to have games.
+  const season = params.get("season") ?? "";
+  const week = params.get("week") ?? "";
+  const weeks = week.split(",").map((w) => w.trim()).filter(Boolean);
+  const isDefaultWeek =
+    season === defaultRange.season && week === defaultRange.week;
+  if (!isDefaultWeek && !weeksAvailable(options, season, weeks)) {
+    params.set("week", "");
     redirect(`/review?${params.toString()}`);
   }
 
