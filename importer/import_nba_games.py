@@ -583,7 +583,7 @@ def choose_highlight(
     away_mascot: str | None = None,
 ):
     if not (home and away):
-        return None, None, []
+        return None, None, None, []
     search_url = YT_SEARCH_URL + quote_plus(youtube_query(event, away, home, game_date))
     game_day = local_date(game_date) if game_date else None
     game_number = series_game_number(event)
@@ -592,7 +592,9 @@ def choose_highlight(
         candidates = [v for v in videos if not is_other_game(v.get("title"), game_day, game_number)]
         preferred = preferred_video(candidates, home, away, home_mascot, away_mascot, game_day)
         if preferred:
-            return preferred["videoId"], search_url, videos
+            # Picked by channel rule, not by score; still record its scorer score.
+            score = score_candidates(home, away, [preferred], home_mascot, away_mascot, limit=1)[0]["score"]
+            return preferred["videoId"], score, search_url, videos
         dated = [v for v in candidates if game_day in title_dates(v.get("title"))]
         best = None
         for pool in (dated, candidates):
@@ -601,8 +603,10 @@ def choose_highlight(
                 break
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, search_url, []
-    return (best.get("video_id") if best else None), search_url, videos
+        return None, None, search_url, []
+    if not best:
+        return None, None, search_url, videos
+    return best.get("video_id"), best.get("score"), search_url, videos
 
 
 def download_image(url: str | None) -> tuple[str | None, str | None]:
@@ -825,6 +829,7 @@ def build_row(
     home_name: str | None,
     away_name: str | None,
     video_id: str | None,
+    highlight_score: int | None = None,
 ):
     event_id = str(event["id"])
     game_date = parse_dt(pick(event, "date"))
@@ -855,6 +860,7 @@ def build_row(
         "overtime": period > 4,
         "thumbnail_url": None,
         "video_id": video_id,
+        "highlight_score": highlight_score if video_id else None,
         "highlights_valid": bool(video_id),
         "highlights_checked": False,
         "better_video_id": None,
@@ -1020,15 +1026,16 @@ def main() -> None:
                 do_search = False
 
             found = None
+            found_score = None
             if do_search:
-                found, search_url, videos = choose_highlight(
+                found, found_score, search_url, videos = choose_highlight(
                     event, home_name, away_name, game_date, home_mascot, away_mascot
                 )
                 time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                 if found:
                     video_id = found
                     highlights_found += 1
-                    print(f"    ✓ {away_name} at {home_name}: {found}", flush=True)
+                    print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
                 else:
                     found = None
                     if no_highlight_examples < 5:
@@ -1047,7 +1054,7 @@ def main() -> None:
                                 flush=True,
                             )
 
-            row = build_row(event, home_id, away_id, home_name, away_name, video_id)
+            row = build_row(event, home_id, away_id, home_name, away_name, video_id, found_score)
             if completed:
                 row.update(fetch_game_stats(event_id))
 
@@ -1092,8 +1099,8 @@ def main() -> None:
                 ]
                 # Keep the existing video when the search comes up empty.
                 if found:
-                    sets += ["video_id = %s", "highlights_valid = %s"]
-                    vals += [found, True]
+                    sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
+                    vals += [found, found_score, True]
                     if checked:
                         # --force-highlights replaced a reviewed pick; send it back to review.
                         sets += ["highlights_checked = %s", "review_status = %s"]
@@ -1110,7 +1117,7 @@ def main() -> None:
                             source_id, external_id, name, season, week, type, postseason_round,
                             game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
-                            overtime, thumbnail_url, video_id, highlights_valid,
+                            overtime, thumbnail_url, video_id, highlight_score, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
                             modified, home_line_scores, away_line_scores, home_team_stats,
                             away_team_stats, game_leaders
@@ -1119,7 +1126,7 @@ def main() -> None:
                             %(type)s, %(postseason_round)s, %(game_date)s, %(location)s,
                             %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
-                            %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
+                            %(thumbnail_url)s, %(video_id)s, %(highlight_score)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,
                             %(review_status)s, %(modified)s, %(home_line_scores)s,
                             %(away_line_scores)s, %(home_team_stats)s, %(away_team_stats)s,

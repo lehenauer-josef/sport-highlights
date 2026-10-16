@@ -83,6 +83,8 @@ export const games = pgTable("games", {
   thumbnailUrl: text("thumbnail_url"),
 
   videoId: text("video_id"),
+  // Scorer score of the auto-picked video; NULL for hand-picked videos.
+  highlightScore: integer("highlight_score"),
   highlightsValid: boolean("highlights_valid").default(false),
   highlightsChecked: boolean("highlights_checked").default(false),
   betterVideoId: text("better_video_id"),

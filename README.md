@@ -78,7 +78,12 @@ Renames need a hand-written SQL migration instead (see `db/migrations/`), so
 renamed the legacy `airtable_id` key column of `teams` and `games` to
 `source_id` (the unique import key, e.g. `nfl:2024_15_BAL_NYG`). `0002` (already
 applied) added `games.postseason_round`; existing postseason games were filled in
-once by a one-off backfill script (removed afterwards, see git history).
+once by a one-off backfill script (removed afterwards, see git history). `0003`
+added `games.highlight_score`, the scorer score (see `importer/highlight_scorer.py`)
+of the auto-picked highlight video. The importers write it together with
+`video_id`, and the review queue shows it on each card. It stays NULL for
+games imported before the column existed and is cleared when a reviewer sets
+a video by hand.
 
 ## 2. Start the web application
 

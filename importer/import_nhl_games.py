@@ -344,7 +344,7 @@ def choose_highlight(
     away_mascot: str | None = None,
 ):
     if not (home and away):
-        return None, None, []
+        return None, None, None, []
     try:
         base = game_date or datetime.now(timezone.utc)
         before = (base + timedelta(days=3)).date().isoformat()
@@ -356,8 +356,10 @@ def choose_highlight(
         best = scorer.find_best_video(home, away, videos, home_mascot, away_mascot)
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, None, []
-    return (best.get("video_id") if best else None), search_url, videos
+        return None, None, None, []
+    if not best:
+        return None, None, search_url, videos
+    return best.get("video_id"), best.get("score"), search_url, videos
 
 
 def load_team_maps(conn):
@@ -663,6 +665,7 @@ def build_row(
     video_id: str | None,
     home_name: str | None,
     away_name: str | None,
+    highlight_score: int | None = None,
 ):
     game_id = str(pick(game, "id"))
     game_date = parse_dt(pick(game, "startTimeUTC", "startTime"))
@@ -687,6 +690,7 @@ def build_row(
         "overtime": bool(period_type and period_type != "REG"),
         "thumbnail_url": None,
         "video_id": video_id,
+        "highlight_score": highlight_score if video_id else None,
         "highlights_valid": bool(video_id),
         "highlights_checked": False,
         "better_video_id": None,
@@ -829,7 +833,7 @@ def main() -> None:
 
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, video_id, highlights_valid, highlights_checked "
+                    "SELECT id, video_id, highlights_valid, highlights_checked, highlight_score "
                     "FROM games WHERE external_id = %s",
                     (str(pick(game, "id")),),
                 )
@@ -838,6 +842,7 @@ def main() -> None:
             video_id = existing[1] if existing else None
             highlights_valid = bool(existing[2]) if existing else False
             checked = bool(existing[3]) if existing else False
+            highlight_score = existing[4] if existing else None
 
             do_search = not args.no_highlights
             if do_search and not args.force_highlights and checked:
@@ -846,7 +851,7 @@ def main() -> None:
                 do_search = False
 
             if do_search:
-                found, search_url, videos = choose_highlight(
+                found, found_score, search_url, videos = choose_highlight(
                     home_name,
                     away_name,
                     game_date,
@@ -856,9 +861,10 @@ def main() -> None:
                 time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                 if found:
                     video_id = found
+                    highlight_score = found_score
                     highlights_valid = True
                     highlights_found += 1
-                    print(f"    ✓ {away_name} at {home_name}: {found}", flush=True)
+                    print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
                 elif no_highlight_examples < 5:
                     no_highlight_examples += 1
                     top = score_candidates(
@@ -889,6 +895,7 @@ def main() -> None:
                 video_id,
                 home_name,
                 away_name,
+                highlight_score,
             )
             row.update(fetch_game_stats(str(pick(game, "id"))) if completed else dict.fromkeys(STAT_COLUMNS))
             # Preserve manually reviewed rows when no new search result is chosen.
@@ -941,8 +948,8 @@ def main() -> None:
                     row["game_leaders"],
                 ]
                 if do_search and not checked:
-                    sets += ["video_id = %s", "highlights_valid = %s"]
-                    vals += [video_id, bool(video_id)]
+                    sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
+                    vals += [video_id, row["highlight_score"], bool(video_id)]
                 vals.append(existing[0])
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE games SET {', '.join(sets)} WHERE id = %s", vals)
@@ -955,7 +962,7 @@ def main() -> None:
                             source_id, external_id, name, season, week, type, postseason_round,
                             game_date,
                             location, home_team_id, away_team_id, home_points, away_points,
-                            overtime, thumbnail_url, video_id, highlights_valid,
+                            overtime, thumbnail_url, video_id, highlight_score, highlights_valid,
                             highlights_checked, better_video_id, reason, review_status,
                             modified, home_team_stats, away_team_stats, game_leaders
                         ) VALUES (
@@ -963,7 +970,7 @@ def main() -> None:
                             %(type)s, %(postseason_round)s, %(game_date)s, %(location)s,
                             %(home_team_id)s,
                             %(away_team_id)s, %(home_points)s, %(away_points)s, %(overtime)s,
-                            %(thumbnail_url)s, %(video_id)s, %(highlights_valid)s,
+                            %(thumbnail_url)s, %(video_id)s, %(highlight_score)s, %(highlights_valid)s,
                             %(highlights_checked)s, %(better_video_id)s, %(reason)s,
                             %(review_status)s, %(modified)s, %(home_team_stats)s,
                             %(away_team_stats)s, %(game_leaders)s

@@ -13,10 +13,12 @@ function VideoPreview({
   label,
   videoId,
   accent,
+  score,
 }: {
   label: string;
   videoId: string | null;
   accent: string;
+  score?: number | null;
 }) {
   const thumb = youtubeThumb(videoId);
   const [info, setInfo] = useState<YouTubeVideoInfo | null>(null);
@@ -48,7 +50,17 @@ function VideoPreview({
 
   return (
     <div className="flex-1">
-      <div className={`mb-1 text-xs font-medium ${accent}`}>{label}</div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className={`text-xs font-medium ${accent}`}>{label}</span>
+        {videoId && score != null ? (
+          <span
+            title="Highlight scorer score of the auto-picked video (picked at 130+)"
+            className="rounded bg-[var(--chip-strong)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[var(--text-muted)]"
+          >
+            Score {score}
+          </span>
+        ) : null}
+      </div>
       {videoId ? (
         <>
           <a
@@ -182,6 +194,7 @@ export function ReviewCard({ game }: { game: GameView }) {
         <VideoPreview
           label="Current"
           videoId={game.videoId}
+          score={game.highlightScore}
           accent="text-[var(--text-muted)]"
         />
 

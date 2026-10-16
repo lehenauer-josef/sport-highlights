@@ -473,7 +473,8 @@ INSERT INTO games (
     home_team_id, away_team_id, home_points, away_points, home_line_scores,
     away_line_scores, home_team_stats, away_team_stats, game_leaders, home_rank, away_rank,
     home_record, away_record,
-    excitement_index, video_id, highlights_valid, highlights_checked, review_status
+    excitement_index, video_id, highlight_score, highlights_valid, highlights_checked,
+    review_status
 ) VALUES (
     %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
     %(postseason_round)s,
@@ -481,7 +482,8 @@ INSERT INTO games (
     %(home_points)s, %(away_points)s, %(home_line_scores)s, %(away_line_scores)s,
     %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s, %(home_rank)s, %(away_rank)s,
     %(home_record)s, %(away_record)s,
-    %(excitement_index)s, %(video_id)s, %(highlights_valid)s, FALSE, 'pending'
+    %(excitement_index)s, %(video_id)s, %(highlight_score)s, %(highlights_valid)s, FALSE,
+    'pending'
 )
 """
 
@@ -617,16 +619,19 @@ def build_query(home, away, game_date):
 
 
 def find_highlight(home, away, game_date, home_mascot, away_mascot):
-    """Search YouTube, then score the results with the highlight scorer; best id or None."""
+    """Search YouTube, then score the results with the highlight scorer.
+    Returns (video_id, score) of the best match, or (None, None)."""
     if not (home and away):
-        return None
+        return None, None
     try:
         videos = search_youtube(build_query(home, away, game_date), limit=20)
         best = scorer.find_best_video(home, away, videos, home_mascot, away_mascot)
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None
-    return best.get("video_id") if best else None
+        return None, None
+    if not best:
+        return None, None
+    return best.get("video_id"), best.get("score")
 
 
 def fetch_rankings(key: str, season: int, season_type: str, week: int | None = None):
@@ -1074,7 +1079,7 @@ def main() -> None:
 
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id, video_id, highlights_valid, highlights_checked "
+                        "SELECT id, video_id, highlights_valid, highlights_checked, highlight_score "
                         "FROM games WHERE external_id = %s",
                         (row["external_id"],),
                     )
@@ -1083,6 +1088,7 @@ def main() -> None:
                 video_id = existing[1] if existing else None
                 highlights_valid = bool(existing[2]) if existing else False
                 checked = bool(existing[3]) if existing else False
+                highlight_score = existing[4] if existing else None
 
                 # Only spend a YouTube search when it can change something and
                 # the human review flag hasn't locked the choice.
@@ -1094,15 +1100,16 @@ def main() -> None:
                     do_search = False
 
                 if do_search:
-                    found = find_highlight(
+                    found, found_score = find_highlight(
                         home, away, game_date, home_mascot, away_mascot
                     )
                     time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                     if found:
                         video_id = found
+                        highlight_score = found_score
                         highlights_valid = True
                         highlights_found += 1
-                        print(f"    ✓ {away} at {home}: {found}", flush=True)
+                        print(f"    ✓ {away} at {home}: {found} (score {found_score})", flush=True)
 
                 if args.dry_run:
                     inserted += 0 if existing else 1
@@ -1133,8 +1140,8 @@ def main() -> None:
                     # Never clobber a human's reviewed pick; otherwise store what
                     # the search produced.
                     if do_search and not checked:
-                        sets += ["video_id = %s", "highlights_valid = %s"]
-                        vals += [video_id, highlights_valid]
+                        sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
+                        vals += [video_id, highlight_score, highlights_valid]
                     vals.append(existing[0])
                     with conn.cursor() as cur:
                         cur.execute(
@@ -1144,6 +1151,7 @@ def main() -> None:
                 else:
                     row["source_id"] = f"cfbd:{row['external_id']}"
                     row["video_id"] = video_id
+                    row["highlight_score"] = highlight_score
                     row["highlights_valid"] = highlights_valid
                     with conn.cursor() as cur:
                         cur.execute(INSERT_SQL, row)

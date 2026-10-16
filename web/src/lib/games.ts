@@ -55,6 +55,7 @@ export const gameColumns = {
   excitementIndex: games.excitementIndex,
   thumbnailUrl: games.thumbnailUrl,
   videoId: games.videoId,
+  highlightScore: games.highlightScore,
   highlightsValid: games.highlightsValid,
   highlightsChecked: games.highlightsChecked,
   betterVideoId: games.betterVideoId,
@@ -104,6 +105,7 @@ export type GameView = {
   excitementIndex: string | null;
   thumbnailUrl: string | null;
   videoId: string | null;
+  highlightScore: number | null;
   highlightsValid: boolean | null;
   highlightsChecked: boolean | null;
   betterVideoId: string | null;

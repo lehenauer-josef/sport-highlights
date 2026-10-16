@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       .update(games)
       .set({
         videoId,
+        highlightScore: null,
         betterVideoId: null,
         highlightsValid: true,
         highlightsChecked: true,
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
       .update(games)
       .set({
         videoId: game.betterVideoId,
+        highlightScore: null,
         betterVideoId: null,
         highlightsValid: true,
         reviewStatus: "approved",
