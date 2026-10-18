@@ -867,26 +867,31 @@ def main() -> None:
                     highlights_valid = True
                     highlights_found += 1
                     print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
-                elif no_highlight_examples < 5:
-                    no_highlight_examples += 1
-                    top = score_candidates(
-                        home_name,
-                        away_name,
-                        videos,
-                        home_mascot,
-                        away_mascot,
-                        limit=3,
-                    )
-                    print(
-                        f"    · no highlight picked for {away_name} at {home_name}\n"
-                        f"      search: {search_url}",
-                        flush=True,
-                    )
-                    for idx, cand in enumerate(top, start=1):
+                else:
+                    if not checked:
+                        video_id = None
+                        highlight_score = None
+                        highlights_valid = False
+                    if no_highlight_examples < 5:
+                        no_highlight_examples += 1
+                        top = score_candidates(
+                            home_name,
+                            away_name,
+                            videos,
+                            home_mascot,
+                            away_mascot,
+                            limit=3,
+                        )
                         print(
-                            f"        {idx}. score={cand['score']} | {cand['title']} | {cand['channel']} | {cand['duration_seconds']}s | {cand['video_id']}",
+                            f"    · no highlight picked for {away_name} at {home_name}\n"
+                            f"      search: {search_url}",
                             flush=True,
                         )
+                        for idx, cand in enumerate(top, start=1):
+                            print(
+                                f"        {idx}. score={cand['score']} | {cand['title']} | {cand['channel']} | {cand['duration_seconds']}s | {cand['video_id']}",
+                                flush=True,
+                            )
 
             row = build_row(
                 game,

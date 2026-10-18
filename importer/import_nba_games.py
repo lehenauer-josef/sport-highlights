@@ -1039,6 +1039,8 @@ def main() -> None:
                     highlights_found += 1
                     print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
                 else:
+                    if not checked:
+                        video_id = None
                     found = None
                     if no_highlight_examples < 5:
                         no_highlight_examples += 1

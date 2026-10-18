@@ -1059,6 +1059,10 @@ def main() -> None:
                         highlights_valid = True
                         highlights_found += 1
                         print(f"    ✓ {away} at {home}: {found} (score {found_score})", flush=True)
+                    elif not checked:
+                        video_id = None
+                        highlight_score = None
+                        highlights_valid = False
 
                 if args.dry_run:
                     inserted += 0 if existing else 1

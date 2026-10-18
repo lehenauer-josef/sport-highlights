@@ -768,10 +768,17 @@ def main() -> None:
                         flush=True,
                     )
                 elif videos:
+                    video_id = None
+                    highlight_score = None
+                    highlights_valid = False
                     print(
                         f"    · no highlight picked for {away_display} at {home_display}",
                         flush=True,
                     )
+                elif not checked:
+                    video_id = None
+                    highlight_score = None
+                    highlights_valid = False
 
             row = game_row(game, home_id, away_id, video_id, home_display, away_display, highlight_score)
             if completed:

@@ -46,7 +46,7 @@ NATIONAL_CHANNEL_TERMS = [
 NATIONAL_CHANNEL_DURATION_BONUS = 25
 LOCAL_ESPN_TRUSTED_CHANNELS = ["espn", "espn college football", "espn cfb"]
 LOCAL_ESPN_CHANNEL_PENALTY = 20
-BAD_CHANNEL_TERMS = ["bluebloods", "hbcu original"]
+BAD_CHANNEL_TERMS = ["bluebloods", "hbcu original", "sports gaming universe"]
 
 TEAM_ALIASES = {
     # NHL nicknames / common short forms.
