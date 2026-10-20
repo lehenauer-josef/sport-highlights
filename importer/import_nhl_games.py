@@ -348,9 +348,9 @@ def choose_highlight(
         return None, None, None, []
     try:
         base = game_date or datetime.now(timezone.utc)
-        before = (base + timedelta(days=3)).date().isoformat()
+        before = (base + timedelta(days=1)).date().isoformat()
         after = (base - timedelta(days=1)).date().isoformat()
-        # Search window: 1 day before to 3 days after; away vs home + NHL highlights.
+        # Search window: 1 day before to 1 day after to avoid wrong series games.
         query = f"{away} vs {home} NHL highlights before:{before} after:{after}"
         search_url = YT_SEARCH_URL + quote_plus(query)
         videos = search_youtube(query, limit=10)
@@ -412,7 +412,7 @@ def team_label(team: dict | None, fallback: str | None = None) -> str | None:
 
 def build_search_url(home, away, game_date):
     base = game_date or datetime.now(timezone.utc)
-    before = (base + timedelta(days=3)).date().isoformat()
+    before = (base + timedelta(days=1)).date().isoformat()
     after = (base - timedelta(days=1)).date().isoformat()
     query = f"{away} vs {home} NHL highlights before:{before} after:{after}"
     return YT_SEARCH_URL + quote_plus(query)
@@ -741,6 +741,11 @@ def main() -> None:
         action="store_true",
         help="Fetch and score but do not write to Postgres.",
     )
+    parser.add_argument(
+        "--postseason-only",
+        action="store_true",
+        help="Only process postseason games (skip regular season).",
+    )
     args = parser.parse_args()
 
     db_url = os.environ.get("DATABASE_URL")
@@ -799,7 +804,10 @@ def main() -> None:
                 skipped_future += 1
                 continue
 
-            if to_int(pick(game, "gameType")) == 1:
+            game_type = to_int(pick(game, "gameType"))
+            if game_type == 1:
+                continue
+            if args.postseason_only and game_type != 3:
                 continue
 
             if args.stats_only:

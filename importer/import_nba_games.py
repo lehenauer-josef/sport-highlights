@@ -365,8 +365,9 @@ def fetch_game_stats(event_id: str) -> dict:
 
 def youtube_query(event: dict, away: str | None, home: str | None, game_date: datetime | None) -> str:
     base = game_date or datetime.now(timezone.utc)
-    before = (base + timedelta(days=3)).date().isoformat()
+    before = (base + timedelta(days=1)).date().isoformat()
     after = (base - timedelta(days=1)).date().isoformat()
+    # Tight search window to avoid matching the wrong game in playoff series.
     # The ESPN event name ("Away at Home") + NBA highlights.
     teams = pick(event, "name") or f"{away} at {home}"
     return f"{teams} NBA highlights before:{before} after:{after}"
@@ -918,6 +919,11 @@ def main() -> None:
         action="store_true",
         help="Fetch and score but do not write to Postgres.",
     )
+    parser.add_argument(
+        "--postseason-only",
+        action="store_true",
+        help="Only process postseason/play-in games (skip regular season).",
+    )
     args = parser.parse_args()
 
     db_url = os.environ.get("DATABASE_URL")
@@ -962,8 +968,11 @@ def main() -> None:
             event_id = str(event["id"])
             game_date = parse_dt(pick(event, "date"))
             season_info = pick(event, "season", default={})
-            if to_int(pick(season_info, "type")) == PRESEASON_TYPE:
+            season_type = to_int(pick(season_info, "type"))
+            if season_type == PRESEASON_TYPE:
                 skipped_preseason += 1
+                continue
+            if args.postseason_only and season_type == REGULAR_SEASON_TYPE:
                 continue
 
             competitions = pick(event, "competitions", default=[]) or [{}]
