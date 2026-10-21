@@ -363,11 +363,7 @@ export function ReviewCard({
         {game.videoId ? (
           <button
             disabled={busy}
-            onClick={() => {
-              if (window.confirm("Remove this video and mark the game rejected?")) {
-                act("clear_video");
-              }
-            }}
+            onClick={() => act("clear_video")}
             title="Remove a deleted or unusable video; the game is marked rejected"
             className={`${btn} bg-[var(--chip-strong)] text-[var(--text)] hover:bg-[var(--surface-strong)]`}
           >
