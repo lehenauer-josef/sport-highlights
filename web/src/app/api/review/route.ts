@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   const id = Number(body?.id);
   if (
     !id ||
-    !["approve", "reject", "accept_better", "set_video", "unvalidate"].includes(
+    !["approve", "reject", "accept_better", "set_video", "unvalidate", "clear_video"].includes(
       action,
     )
   ) {
@@ -85,6 +85,18 @@ export async function POST(request: Request) {
     await db
       .update(games)
       .set({ highlightsChecked: false, reviewStatus: "pending" })
+      .where(eq(games.id, id));
+  } else if (action === "clear_video") {
+    await db
+      .update(games)
+      .set({
+        videoId: null,
+        highlightScore: null,
+        betterVideoId: null,
+        highlightsValid: false,
+        highlightsChecked: true,
+        reviewStatus: "rejected",
+      })
       .where(eq(games.id, id));
   } else if (action === "reject") {
     await db
