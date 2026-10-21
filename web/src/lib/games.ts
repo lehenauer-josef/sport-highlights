@@ -480,6 +480,59 @@ export async function validateReviewGames(
   return updated.map((r) => r.id);
 }
 
+// Games "Unvalidate all" resets: checked games matching the filters (regardless of "Show all").
+function checkedFilterWhere(f: GameFilters): SQL | null {
+  if (!f.sportLabel) return null;
+  return and(
+    buildWhere(f, conferenceTypesForSport(f.sportLabel)),
+    eq(games.highlightsChecked, true),
+  )!;
+}
+
+export async function countUnvalidatableReviewGames(f: GameFilters): Promise<number> {
+  const where = checkedFilterWhere(f);
+  if (!where) return 0;
+  const [res] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(games)
+    .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+    .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+    .where(where);
+  return res?.n ?? 0;
+}
+
+// Unvalidate many games at once: an explicit id list, or every checked game
+// matching the filters. Only checked games are touched; they return to pending.
+// Returns the ids that were unvalidated.
+export async function unvalidateReviewGames(
+  target: { ids: number[] } | { filters: GameFilters },
+): Promise<number[]> {
+  let where: SQL | undefined;
+  if ("ids" in target) {
+    if (!target.ids.length) return [];
+    where = and(inArray(games.id, target.ids), eq(games.highlightsChecked, true));
+  } else {
+    const filtered = checkedFilterWhere(target.filters);
+    if (!filtered) return [];
+    // The filters reference the joined team aliases, so select ids first.
+    where = inArray(
+      games.id,
+      db
+        .select({ id: games.id })
+        .from(games)
+        .leftJoin(homeTeam, eq(games.homeTeamId, homeTeam.id))
+        .leftJoin(awayTeam, eq(games.awayTeamId, awayTeam.id))
+        .where(filtered),
+    );
+  }
+  const updated = await db
+    .update(games)
+    .set({ highlightsChecked: false, reviewStatus: "pending" })
+    .where(where)
+    .returning({ id: games.id });
+  return updated.map((r) => r.id);
+}
+
 // The requested team names that exist for the sport (case-insensitive), in
 // their stored spelling, deduplicated and in request order. Used to drop
 // unknown teams from the URL.

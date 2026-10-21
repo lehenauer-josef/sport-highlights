@@ -7,6 +7,7 @@ import {
   sportToSlug,
 } from "@/lib/sports";
 import {
+  countUnvalidatableReviewGames,
   countValidatableReviewGames,
   fetchReviewGames,
   loadDefaultSeasonAndWeek,
@@ -141,10 +142,12 @@ export default async function ReviewPage({
   const filters = parseFilters(params);
   filters.sportLabel = sport;
 
-  const [{ rows, total, hasMore }, validatableTotal] = await Promise.all([
-    fetchReviewGames(filters, { showAll }),
-    countValidatableReviewGames(filters),
-  ]);
+  const [{ rows, total, hasMore }, validatableTotal, unvalidatableTotal] =
+    await Promise.all([
+      fetchReviewGames(filters, { showAll }),
+      countValidatableReviewGames(filters),
+      showAll ? countUnvalidatableReviewGames(filters) : 0,
+    ]);
 
   // Querystring the infinite-scroll list re-uses to fetch further pages.
   const listQuery = new URLSearchParams(params);
@@ -178,6 +181,7 @@ export default async function ReviewPage({
         initial={rows}
         initialHasMore={hasMore}
         query={listQuery.toString()}
+        unvalidatableTotal={unvalidatableTotal}
         showAll={showAll}
         validatableTotal={validatableTotal}
       />

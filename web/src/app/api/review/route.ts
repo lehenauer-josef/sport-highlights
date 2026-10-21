@@ -7,7 +7,9 @@ import {
   fetchGameById,
   fetchReviewGames,
   parseFilters,
+  unvalidateReviewGames,
   validateReviewGames,
+  type GameFilters,
 } from "@/lib/games";
 import { parseVideoId } from "@/lib/youtube";
 
@@ -27,28 +29,35 @@ export async function GET(request: Request) {
 
 // Update a game's review outcome: approve current, reject, accept the scorer's
 // proposed better match, or set a hand-picked video id as the current highlight.
-// Bulk: "validate_many" approves the given ids; "validate_all" approves every
-// validatable game matching the queue filters in "query".
+// Bulk: "*_many" acts on the given ids; "*_all" acts on every game matching the
+// queue filters in "query" (validate: unchecked with a video; unvalidate: checked).
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const action = String(body?.action ?? "");
 
-  if (action === "validate_many" || action === "validate_all") {
-    let ids: number[];
-    if (action === "validate_many") {
+  if (
+    ["validate_many", "validate_all", "unvalidate_many", "unvalidate_all"].includes(
+      action,
+    )
+  ) {
+    let target: { ids: number[] } | { filters: GameFilters };
+    if (action.endsWith("_many")) {
       const raw: unknown[] = Array.isArray(body?.ids) ? body.ids : [];
       const requested = raw.map(Number).filter((n) => Number.isInteger(n) && n > 0);
       if (!requested.length) {
         return NextResponse.json({ error: "no ids" }, { status: 400 });
       }
-      ids = await validateReviewGames({ ids: requested });
+      target = { ids: requested };
     } else {
       const filters = parseFilters(new URLSearchParams(String(body?.query ?? "")));
       if (!filters.sportLabel) {
         return NextResponse.json({ error: "invalid filters" }, { status: 400 });
       }
-      ids = await validateReviewGames({ filters });
+      target = { filters };
     }
+    const ids = action.startsWith("unvalidate_")
+      ? await unvalidateReviewGames(target)
+      : await validateReviewGames(target);
     revalidatePath("/review");
     return NextResponse.json({ ok: true, ids });
   }

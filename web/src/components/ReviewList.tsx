@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import type { GameView } from "@/lib/games";
 import { ReviewCard } from "@/components/ReviewCard";
 
+type BulkKind = "validate" | "unvalidate";
+
+// Cards that can be bulk-validated (unchecked, with a video) or bulk-unvalidated (checked).
+function canSelect(g: GameView) {
+  return Boolean(g.highlightsChecked || g.videoId);
+}
+
 // Server renders the first page; further pages are appended as the sentinel
 // scrolls into view. `query` is the filter querystring (incl. "all").
 export function ReviewList({
@@ -13,6 +20,7 @@ export function ReviewList({
   query,
   showAll,
   validatableTotal,
+  unvalidatableTotal,
 }: {
   initial: GameView[];
   initialHasMore: boolean;
@@ -20,12 +28,14 @@ export function ReviewList({
   showAll: boolean;
   // Unchecked games with a video matching the filters ("Validate all").
   validatableTotal: number;
+  // Checked games matching the filters ("Unvalidate all"); 0 unless "Show all".
+  unvalidatableTotal: number;
 }) {
   const router = useRouter();
   const [refreshing, startTransition] = useTransition();
   const [rows, setRows] = useState<GameView[]>(initial);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<BulkKind | null>(null);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -107,8 +117,19 @@ export function ReviewList({
     [showAll],
   );
 
-  async function bulkValidate(body: Record<string, unknown>) {
-    setBulkBusy(true);
+  // Unvalidated games go back to pending; they stay listed (only "Show all" shows checked games).
+  const applyUnvalidated = useCallback((ids: number[]) => {
+    const done = new Set(ids);
+    setRows((prev) =>
+      prev.map((g) =>
+        done.has(g.id) ? { ...g, reviewStatus: "pending", highlightsChecked: false } : g,
+      ),
+    );
+    setSelected((prev) => new Set([...prev].filter((id) => !done.has(id))));
+  }, []);
+
+  async function bulkRequest(kind: BulkKind, body: Record<string, unknown>) {
+    setBulkBusy(kind);
     try {
       const res = await fetch("/api/review", {
         method: "POST",
@@ -117,20 +138,29 @@ export function ReviewList({
       });
       const data: { ids?: number[] } = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error("failed");
-      applyValidated(data.ids ?? []);
+      if (kind === "validate") applyValidated(data.ids ?? []);
+      else applyUnvalidated(data.ids ?? []);
     } catch {
-      window.alert("Validation failed. Please try again.");
+      window.alert(
+        kind === "validate"
+          ? "Validation failed. Please try again."
+          : "Unvalidation failed. Please try again.",
+      );
     } finally {
-      setBulkBusy(false);
+      setBulkBusy(null);
     }
-    // Refresh the server counts ("to check", "Validate all").
+    // Refresh the server counts ("to check", "Validate all", "Unvalidate all").
     startTransition(() => router.refresh());
   }
 
-  const selectable = rows.filter((g) => g.videoId && !g.highlightsChecked);
+  const selectable = rows.filter(canSelect);
   const allLoadedSelected =
     selectable.length > 0 && selectable.every((g) => selected.has(g.id));
-  const busy = bulkBusy || refreshing;
+  // Each bulk action applies only to its own kind of selected card.
+  const selectedRows = rows.filter((g) => selected.has(g.id));
+  const toValidate = selectedRows.filter((g) => !g.highlightsChecked).map((g) => g.id);
+  const toUnvalidate = selectedRows.filter((g) => g.highlightsChecked).map((g) => g.id);
+  const busy = bulkBusy !== null || refreshing;
 
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -146,20 +176,30 @@ export function ReviewList({
   }
 
   function validateSelected() {
-    if (!selected.size) return;
-    bulkValidate({ action: "validate_many", ids: [...selected] });
+    if (!toValidate.length) return;
+    bulkRequest("validate", { action: "validate_many", ids: toValidate });
   }
 
   function validateAll() {
     if (!validatableTotal) return;
-    bulkValidate({ action: "validate_all", query });
+    bulkRequest("validate", { action: "validate_all", query });
+  }
+
+  function unvalidateSelected() {
+    if (!toUnvalidate.length) return;
+    bulkRequest("unvalidate", { action: "unvalidate_many", ids: toUnvalidate });
+  }
+
+  function unvalidateAll() {
+    if (!unvalidatableTotal) return;
+    bulkRequest("unvalidate", { action: "unvalidate_all", query });
   }
 
   const btn =
     "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-40";
 
   const toolbar =
-    selectable.length > 0 || validatableTotal > 0 ? (
+    selectable.length > 0 || validatableTotal > 0 || unvalidatableTotal > 0 ? (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--input-border)] bg-[var(--surface)] px-4 py-2">
         <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-muted)]">
           <input
@@ -180,6 +220,17 @@ export function ReviewList({
         >
           ✓ Validate all matching ({validatableTotal})
         </button>
+        {unvalidatableTotal > 0 ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={unvalidateAll}
+            title="Mark every checked game matching the filters as unchecked and pending"
+            className={`${btn} bg-red-500 text-white hover:bg-red-400`}
+          >
+            Unvalidate all matching ({unvalidatableTotal})
+          </button>
+        ) : null}
       </div>
     ) : null;
 
@@ -201,9 +252,7 @@ export function ReviewList({
             game={game}
             onUpdated={onUpdated}
             selected={selected.has(game.id)}
-            onToggleSelect={
-              game.videoId && !game.highlightsChecked ? toggleSelect : undefined
-            }
+            onToggleSelect={canSelect(game) ? toggleSelect : undefined}
           />
         ))}
       </div>
@@ -226,14 +275,30 @@ export function ReviewList({
           >
             Clear
           </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={validateSelected}
-            className={`${btn} bg-emerald-500 text-black hover:bg-emerald-400`}
-          >
-            {busy ? "Validating…" : `✓ Validate selected (${selected.size})`}
-          </button>
+          {toValidate.length > 0 ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={validateSelected}
+              className={`${btn} bg-emerald-500 text-black hover:bg-emerald-400`}
+            >
+              {bulkBusy === "validate"
+                ? "Validating…"
+                : `✓ Validate selected (${toValidate.length})`}
+            </button>
+          ) : null}
+          {toUnvalidate.length > 0 ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={unvalidateSelected}
+              className={`${btn} bg-red-500 text-white hover:bg-red-400`}
+            >
+              {bulkBusy === "unvalidate"
+                ? "Unvalidating…"
+                : `Unvalidate selected (${toUnvalidate.length})`}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </>

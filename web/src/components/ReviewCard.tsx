@@ -197,7 +197,7 @@ export function ReviewCard({
               type="checkbox"
               checked={selected}
               onChange={() => onToggleSelect(game.id)}
-              title="Select for bulk validation"
+              title="Select for bulk validate or unvalidate"
               aria-label={`Select ${game.awayTeamName} @ ${game.homeTeamName}`}
               className="h-4 w-4 shrink-0 cursor-pointer self-center accent-emerald-500"
             />
