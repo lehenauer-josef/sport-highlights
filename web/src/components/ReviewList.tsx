@@ -245,7 +245,7 @@ export function ReviewList({
   return (
     <>
       {toolbar}
-      <div className="grid grid-cols-1 gap-4 min-[1024px]:grid-cols-2 min-[1536px]:grid-cols-3 min-[1900px]:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 min-[1024px]:grid-cols-2 min-[1900px]:grid-cols-3">
         {rows.map((game) => (
           <ReviewCard
             key={game.id}
