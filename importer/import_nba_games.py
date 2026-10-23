@@ -585,7 +585,7 @@ def choose_highlight(
     away_mascot: str | None = None,
 ):
     if not (home and away):
-        return None, None, None, []
+        return None, None, None, [], None
     search_url = YT_SEARCH_URL + quote_plus(youtube_query(event, away, home, game_date))
     game_day = local_date(game_date) if game_date else None
     game_number = series_game_number(event)
@@ -596,7 +596,8 @@ def choose_highlight(
         if preferred:
             # Picked by channel rule, not by score; still record its scorer score.
             score = score_candidates(home, away, [preferred], home_mascot, away_mascot, limit=1)[0]["score"]
-            return preferred["videoId"], score, search_url, videos
+            auto = scorer.auto_approve_reason("NBA", scorer_safe([preferred])[0], score)
+            return preferred["videoId"], score, search_url, videos, auto
         dated = [v for v in candidates if game_day in title_dates(v.get("title"))]
         best = None
         for pool in (dated, candidates):
@@ -605,10 +606,11 @@ def choose_highlight(
                 break
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, None, search_url, []
+        return None, None, search_url, [], None
     if not best:
-        return None, None, search_url, videos
-    return best.get("video_id"), best.get("score"), search_url, videos
+        return None, None, search_url, videos, None
+    score = best.get("score")
+    return best.get("video_id"), score, search_url, videos, scorer.auto_approve_reason("NBA", best, score)
 
 
 def download_image(url: str | None) -> tuple[str | None, str | None]:
@@ -1038,15 +1040,24 @@ def main() -> None:
 
             found = None
             found_score = None
+            auto_reason = None
             if do_search:
-                found, found_score, search_url, videos = choose_highlight(
+                found, found_score, search_url, videos, found_auto = choose_highlight(
                     event, home_name, away_name, game_date, home_mascot, away_mascot
                 )
                 time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                 if found:
+                    # Only a newly picked video can be auto-approved, so a
+                    # rejected/unvalidated pick isn't re-approved next run.
+                    if found != video_id:
+                        auto_reason = found_auto
                     video_id = found
                     highlights_found += 1
-                    print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
+                    print(
+                        f"    ✓ {away_name} at {home_name}: {found} (score {found_score})"
+                        + (f" — {auto_reason}" if auto_reason else ""),
+                        flush=True,
+                    )
                 else:
                     if not checked:
                         video_id = None
@@ -1068,6 +1079,8 @@ def main() -> None:
                             )
 
             row = build_row(event, home_id, away_id, home_name, away_name, video_id, found_score)
+            if auto_reason:
+                row.update(highlights_checked=True, review_status="approved", reason=auto_reason)
             if completed:
                 row.update(fetch_game_stats(event_id))
             if row["season"]:
@@ -1116,7 +1129,10 @@ def main() -> None:
                 if found:
                     sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
                     vals += [found, found_score, True]
-                    if checked:
+                    if auto_reason:
+                        sets += ["highlights_checked = TRUE", "review_status = 'approved'", "reason = %s"]
+                        vals.append(auto_reason)
+                    elif checked:
                         # --force-highlights replaced a reviewed pick; send it back to review.
                         sets += ["highlights_checked = %s", "review_status = %s"]
                         vals += [False, "pending"]

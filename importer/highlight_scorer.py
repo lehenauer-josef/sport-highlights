@@ -48,6 +48,20 @@ LOCAL_ESPN_TRUSTED_CHANNELS = ["espn", "espn college football", "espn cfb"]
 LOCAL_ESPN_CHANNEL_PENALTY = 20
 BAD_CHANNEL_TERMS = ["bluebloods", "hbcu original", "sports gaming universe"]
 
+# Per sport: trusted YouTube channels (exact name, case-insensitive) and the
+# inclusive duration span (seconds). A newly picked video matching both is
+# approved by the importer without human review.
+AUTO_APPROVE_RULES = {
+    "College Football": {
+        "channels": ["espn college football", "cfb on fox"],
+        "min_s": 10 * 60,
+        "max_s": 29 * 60 + 59,
+    },
+    "NFL": {"channels": ["nfl"], "min_s": 10 * 60, "max_s": 20 * 60},
+    "NBA": {"channels": ["gametime highlights"], "min_s": 7 * 60, "max_s": 15 * 60},
+    "NHL": {"channels": ["sportsnet", "nhl"], "min_s": 7 * 60, "max_s": 15 * 60},
+}
+
 TEAM_ALIASES = {
     # NHL nicknames / common short forms.
     "anaheim ducks": ["ducks"],
@@ -405,6 +419,39 @@ def candidate_score(item, home, away, home_mascot=None, away_mascot=None):
     if channel_is_local_espn(channel):
         score -= LOCAL_ESPN_CHANNEL_PENALTY
     return score
+
+
+def format_duration(seconds):
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def auto_approve_reason(sport, video, score):
+    """Return a review note if `video` qualifies for auto-approval, else None.
+
+    `video` needs "title", "channel" and "duration_seconds" (or a "duration"
+    string). Callers must already have checked that the title names both teams
+    (find_best_video and the importers' channel-rule picks do). Guardrails:
+    trusted channel, duration in the sport's span, clean title, and a scorer
+    score of at least BETTER_MATCH_MIN_SCORE.
+    """
+    rule = AUTO_APPROVE_RULES.get(sport)
+    if not rule or not video:
+        return None
+    channel = (video.get("channel") or "").strip()
+    if channel.lower() not in rule["channels"]:
+        return None
+    duration = video.get("duration_seconds")
+    if duration is None:
+        duration = parse_duration(video.get("duration"))
+    if duration is None or not rule["min_s"] <= duration <= rule["max_s"]:
+        return None
+    if score is None or score < BETTER_MATCH_MIN_SCORE:
+        return None
+    if title_is_bad(video.get("title"), channel):
+        return None
+    return f"Auto-approved: {channel} · {format_duration(duration)}"
 
 
 def find_best_video(home, away, videos, home_mascot=None, away_mascot=None):

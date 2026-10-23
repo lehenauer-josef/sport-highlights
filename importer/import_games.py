@@ -423,7 +423,7 @@ INSERT INTO games (
     away_line_scores, home_team_stats, away_team_stats, game_leaders, home_rank, away_rank,
     home_record, away_record,
     excitement_index, video_id, highlight_score, highlights_valid, highlights_checked,
-    review_status
+    review_status, reason
 ) VALUES (
     %(source_id)s, %(external_id)s, %(name)s, %(season)s, %(week)s, %(type)s,
     %(postseason_round)s,
@@ -431,8 +431,8 @@ INSERT INTO games (
     %(home_points)s, %(away_points)s, %(home_line_scores)s, %(away_line_scores)s,
     %(home_team_stats)s, %(away_team_stats)s, %(game_leaders)s, %(home_rank)s, %(away_rank)s,
     %(home_record)s, %(away_record)s,
-    %(excitement_index)s, %(video_id)s, %(highlight_score)s, %(highlights_valid)s, FALSE,
-    'pending'
+    %(excitement_index)s, %(video_id)s, %(highlight_score)s, %(highlights_valid)s,
+    %(highlights_checked)s, %(review_status)s, %(reason)s
 )
 """
 
@@ -569,18 +569,20 @@ def build_query(home, away, game_date):
 
 def find_highlight(home, away, game_date, home_mascot, away_mascot):
     """Search YouTube, then score the results with the highlight scorer.
-    Returns (video_id, score) of the best match, or (None, None)."""
+    Returns (video_id, score, auto_approve_reason) of the best match, or
+    (None, None, None)."""
     if not (home and away):
-        return None, None
+        return None, None, None
     try:
         videos = search_youtube(build_query(home, away, game_date), limit=20)
         best = scorer.find_best_video(home, away, videos, home_mascot, away_mascot)
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, None
+        return None, None, None
     if not best:
-        return None, None
-    return best.get("video_id"), best.get("score")
+        return None, None, None
+    score = best.get("score")
+    return best.get("video_id"), score, scorer.auto_approve_reason("College Football", best, score)
 
 
 def fetch_rankings(key: str, season: int, season_type: str, week: int | None = None):
@@ -1048,17 +1050,26 @@ def main() -> None:
                 if do_search and is_future:
                     do_search = False
 
+                auto_reason = None
                 if do_search:
-                    found, found_score = find_highlight(
+                    found, found_score, found_auto = find_highlight(
                         home, away, game_date, home_mascot, away_mascot
                     )
                     time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                     if found:
+                        # Only a newly picked video can be auto-approved, so a
+                        # rejected/unvalidated pick isn't re-approved next run.
+                        if found != video_id:
+                            auto_reason = found_auto
                         video_id = found
                         highlight_score = found_score
                         highlights_valid = True
                         highlights_found += 1
-                        print(f"    ✓ {away} at {home}: {found} (score {found_score})", flush=True)
+                        print(
+                            f"    ✓ {away} at {home}: {found} (score {found_score})"
+                            + (f" — {auto_reason}" if auto_reason else ""),
+                            flush=True,
+                        )
                     elif not checked:
                         video_id = None
                         highlight_score = None
@@ -1095,6 +1106,9 @@ def main() -> None:
                     if do_search and not checked:
                         sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
                         vals += [video_id, highlight_score, highlights_valid]
+                        if auto_reason:
+                            sets += ["highlights_checked = TRUE", "review_status = 'approved'", "reason = %s"]
+                            vals += [auto_reason]
                     vals.append(existing[0])
                     with conn.cursor() as cur:
                         cur.execute(
@@ -1106,6 +1120,9 @@ def main() -> None:
                     row["video_id"] = video_id
                     row["highlight_score"] = highlight_score
                     row["highlights_valid"] = highlights_valid
+                    row["highlights_checked"] = bool(auto_reason)
+                    row["review_status"] = "approved" if auto_reason else "pending"
+                    row["reason"] = auto_reason
                     with conn.cursor() as cur:
                         cur.execute(INSERT_SQL, row)
                     inserted += 1

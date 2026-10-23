@@ -108,6 +108,26 @@ The review queue loads more games as you scroll and supports bulk validation
 "Validate all matching" to validate every unchecked game with a video that
 matches the current filters (rejected games are skipped).
 
+### Auto-approval
+
+The importers approve a newly picked highlight without review when it comes from
+a trusted channel and its duration is within the sport's span
+(`AUTO_APPROVE_RULES` in `importer/highlight_scorer.py`):
+
+| Sport            | Trusted channels (exact name)         | Duration      |
+| ---------------- | ------------------------------------- | ------------- |
+| College Football | ESPN College Football, CFB ON FOX     | 10:00–29:59   |
+| NFL              | NFL                                   | 10:00–20:00   |
+| NBA              | GameTime Highlights                   | 7:00–15:00    |
+| NHL              | Sportsnet, NHL                        | 7:00–15:00    |
+
+The usual scorer guardrails still apply (title names both teams, no
+recap/preview/condensed-style terms, score ≥ 130). Auto-approved games are
+marked checked/approved with a note like "Auto-approved: NFL · 12:41". Only a
+newly picked video (different from the stored one) qualifies, so existing
+pending games and videos a reviewer rejected or unvalidated are not approved
+on a later run.
+
 The Week dropdown lists only weeks and rounds with games in the selected season,
 grouped: "Regular Season" (Week 1…N, then "All" regular-season games,
 `week=regular`) and "Postseason" (the rounds, then "All" postseason games,

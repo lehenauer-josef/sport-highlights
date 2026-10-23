@@ -513,21 +513,22 @@ def choose_highlight(
     game_date: datetime | None,
     home_mascot: str | None = None,
     away_mascot: str | None = None,
-) -> tuple[str | None, int | None, list[dict]]:
+) -> tuple[str | None, int | None, list[dict], str | None]:
     if not (home and away):
-        return None, None, []
+        return None, None, [], None
     try:
         query = build_search_query(home, away, game_date)
         videos = search_youtube(query, limit=5)
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, None, []
+        return None, None, [], None
     if not videos:
-        return None, None, []
+        return None, None, [], None
     best = scorer.find_best_video(home, away, videos, home_mascot, away_mascot)
     if not best:
-        return None, None, videos
-    return best.get("video_id"), best.get("score"), videos
+        return None, None, videos, None
+    score = best.get("score")
+    return best.get("video_id"), score, videos, scorer.auto_approve_reason("NFL", best, score)
 
 
 # nflverse game_type per playoff round.
@@ -749,8 +750,9 @@ def main() -> None:
             if do_search and is_future:
                 do_search = False
 
+            auto_reason = None
             if do_search:
-                found, found_score, videos = choose_highlight(
+                found, found_score, videos, found_auto = choose_highlight(
                     home_display,
                     away_display,
                     game_date,
@@ -759,12 +761,17 @@ def main() -> None:
                 )
                 time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                 if found:
+                    # Only a newly picked video can be auto-approved, so a
+                    # rejected/unvalidated pick isn't re-approved next run.
+                    if found != video_id:
+                        auto_reason = found_auto
                     video_id = found
                     highlight_score = found_score
                     highlights_valid = True
                     highlights_found += 1
                     print(
-                        f"    ✓ {away_display} at {home_display}: {found} (score {found_score})",
+                        f"    ✓ {away_display} at {home_display}: {found} (score {found_score})"
+                        + (f" — {auto_reason}" if auto_reason else ""),
                         flush=True,
                     )
                 elif videos:
@@ -787,8 +794,9 @@ def main() -> None:
             # These extra values are only meaningful when we actually searched.
             if do_search or not existing:
                 row["highlights_valid"] = bool(video_id)
-                row["highlights_checked"] = False
-                row["review_status"] = "pending"
+                row["highlights_checked"] = bool(auto_reason)
+                row["review_status"] = "approved" if auto_reason else "pending"
+                row["reason"] = auto_reason
 
             if args.dry_run:
                 inserted += 0 if existing else 1
@@ -851,7 +859,10 @@ def main() -> None:
                 ]
                 if do_search and not checked:
                     sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s", "highlights_checked = %s", "review_status = %s"]
-                    vals += [video_id, row["highlight_score"], bool(video_id), False, "pending"]
+                    vals += [video_id, row["highlight_score"], bool(video_id), row["highlights_checked"], row["review_status"]]
+                    if auto_reason:
+                        sets.append("reason = %s")
+                        vals.append(auto_reason)
                 vals.append(existing[0])
                 with conn.cursor() as cur:
                     cur.execute(

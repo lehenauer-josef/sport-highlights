@@ -345,7 +345,7 @@ def choose_highlight(
     away_mascot: str | None = None,
 ):
     if not (home and away):
-        return None, None, None, []
+        return None, None, None, [], None
     try:
         base = game_date or datetime.now(timezone.utc)
         before = (base + timedelta(days=1)).date().isoformat()
@@ -357,10 +357,11 @@ def choose_highlight(
         best = scorer.find_best_video(home, away, videos, home_mascot, away_mascot)
     except Exception as exc:  # network/parse errors shouldn't abort the run
         print(f"    highlight search error: {exc}", flush=True)
-        return None, None, None, []
+        return None, None, None, [], None
     if not best:
-        return None, None, search_url, videos
-    return best.get("video_id"), best.get("score"), search_url, videos
+        return None, None, search_url, videos, None
+    score = best.get("score")
+    return best.get("video_id"), score, search_url, videos, scorer.auto_approve_reason("NHL", best, score)
 
 
 def load_team_maps(conn):
@@ -860,8 +861,9 @@ def main() -> None:
             if do_search and is_future:
                 do_search = False
 
+            auto_reason = None
             if do_search:
-                found, found_score, search_url, videos = choose_highlight(
+                found, found_score, search_url, videos, found_auto = choose_highlight(
                     home_name,
                     away_name,
                     game_date,
@@ -870,11 +872,19 @@ def main() -> None:
                 )
                 time.sleep(random.uniform(0.8, 1.8))  # be polite to YouTube
                 if found:
+                    # Only a newly picked video can be auto-approved, so a
+                    # rejected/unvalidated pick isn't re-approved next run.
+                    if found != video_id:
+                        auto_reason = found_auto
                     video_id = found
                     highlight_score = found_score
                     highlights_valid = True
                     highlights_found += 1
-                    print(f"    ✓ {away_name} at {home_name}: {found} (score {found_score})", flush=True)
+                    print(
+                        f"    ✓ {away_name} at {home_name}: {found} (score {found_score})"
+                        + (f" — {auto_reason}" if auto_reason else ""),
+                        flush=True,
+                    )
                 else:
                     if not checked:
                         video_id = None
@@ -918,8 +928,9 @@ def main() -> None:
             # Preserve manually reviewed rows when no new search result is chosen.
             if do_search or not existing:
                 row["highlights_valid"] = bool(video_id)
-                row["highlights_checked"] = False
-                row["review_status"] = "pending"
+                row["highlights_checked"] = bool(auto_reason)
+                row["review_status"] = "approved" if auto_reason else "pending"
+                row["reason"] = auto_reason
 
             if args.dry_run:
                 inserted += 0 if existing else 1
@@ -967,6 +978,9 @@ def main() -> None:
                 if do_search and not checked:
                     sets += ["video_id = %s", "highlight_score = %s", "highlights_valid = %s"]
                     vals += [video_id, row["highlight_score"], bool(video_id)]
+                    if auto_reason:
+                        sets += ["highlights_checked = TRUE", "review_status = 'approved'", "reason = %s"]
+                        vals.append(auto_reason)
                 vals.append(existing[0])
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE games SET {', '.join(sets)} WHERE id = %s", vals)
