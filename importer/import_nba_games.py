@@ -12,9 +12,9 @@
 - and upserts the result into `games` (keyed by the ESPN event id).
 
 Without `--season` the importer processes the last `--days` days (default 17).
-Use `--season` to import a whole season;
-NBA seasons are identified by their end year, so `2026` (or `2025-26`) is the
-2025-26 season.
+Use `--season` to import a whole season. Like the other sports, seasons are
+stored and selected by their start year, so `2025` (or `2025-26`) is the
+2025-26 season; ESPN's end-year season id is only used for its API.
 
 The NBA has no numbered weeks, so the importer derives them as consecutive
 7-day blocks (US Eastern dates) starting on the first day of the regular season.
@@ -24,9 +24,9 @@ Usage:
     export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
     python import_nba_games.py
     python import_nba_games.py --days 3
-    python import_nba_games.py --season 2026
+    python import_nba_games.py --season 2025
     python import_nba_games.py --season 2025-26 --limit 10 --dry-run
-    python import_nba_games.py --season 2026 --stats-only
+    python import_nba_games.py --season 2025 --stats-only
 """
 from __future__ import annotations
 
@@ -124,16 +124,17 @@ def local_date(dt: datetime) -> date:
 
 
 def parse_season(value) -> int | None:
-    """Accept `2026`, `2025-26` or `2025-2026` and return ESPN's end-year season."""
+    """Accept start year `2025`, `2025-26` or `2025-2026` and return ESPN's
+    end-year season id (2026)."""
     if value in (None, ""):
         return None
     text = str(value).strip()
     if re.fullmatch(r"\d{4}", text):
-        return int(text)
+        return int(text) + 1
     m = re.fullmatch(r"(\d{4})-(\d{2}|\d{4})", text)
     if m:
         return int(m.group(1)) + 1
-    raise SystemExit(f"Invalid --season {value!r}; use e.g. 2026 or 2025-26.")
+    raise SystemExit(f"Invalid --season {value!r}; use e.g. 2025 or 2025-26.")
 
 
 def fetch_json(url: str):
@@ -850,7 +851,8 @@ def build_row(
         "source_id": f"nba:{event_id}",
         "external_id": event_id,
         "name": pick(event, "name") or (f"{away_name} at {home_name}" if home_name and away_name else None),
-        "season": str(season_year) if season_year else None,
+        # Stored by start year (2025-26 -> "2025") like the other sports; ESPN uses the end year.
+        "season": str(season_year - 1) if season_year else None,
         "week": week,
         # Everything after the regular season (incl. play-in) is postseason.
         "type": "regular" if season_type == REGULAR_SEASON_TYPE else "postseason",
@@ -882,7 +884,7 @@ def main() -> None:
     parser.add_argument(
         "--season",
         default=None,
-        help="Whole season to import, by end year (e.g. 2026 or 2025-26). Omit to import the last --days days.",
+        help="Whole season to import, by start year (e.g. 2025 or 2025-26). Omit to import the last --days days.",
     )
     parser.add_argument(
         "--days",

@@ -84,7 +84,8 @@ added `games.highlight_score`, the scorer score (see `importer/highlight_scorer.
 of the auto-picked highlight video. The importers write it together with
 `video_id`, and the review queue shows it on each card. It stays NULL for
 games imported before the column existed and is cleared when a reviewer sets
-a video by hand.
+a video by hand. `0004` (already applied) moved NBA games from ESPN's end-year
+season (`2026` = 2025-26) to the start year used by every other sport (`2025`).
 
 ## 2. Start the web application
 
@@ -279,7 +280,8 @@ whose title names a different date or playoff game number), and upserts the
 result into Postgres keyed by the ESPN event id. Play-in and playoff games are
 stored as `postseason`.
 
-NBA seasons are identified by their end year (`2026` = 2025-26). The NBA has no
+NBA seasons are identified by their start year like the other sports (`2025` =
+2025-26; ESPN's end-year id is only used for its API). The NBA has no
 numbered weeks, so the importer derives them as consecutive 7-day blocks (US
 Eastern dates) starting on the first day of the regular season; postseason games
 continue the numbering. Running the importer again also fills in week numbers for
@@ -298,7 +300,7 @@ stored game names. College team rows are never modified.
 python3 importer/import_nba_games.py                        # last 17 days
 python3 importer/import_nba_games.py --days 3
 python3 importer/import_nba_games.py --season 2025-26
-python3 importer/import_nba_games.py --season 2026 --limit 10 --dry-run
+python3 importer/import_nba_games.py --season 2025 --limit 10 --dry-run
 # Backfill game stats only, preserving all existing game metadata/highlight reviews:
 python3 importer/import_nba_games.py --stats-only
 python3 importer/import_nba_games.py --season 2025-26 --stats-only
@@ -324,7 +326,7 @@ Common flags:
 
 | Flag                 | Description                                                         |
 | -------------------- | ------------------------------------------------------------------- |
-| `--season SEASON`    | Import a whole season by end year (`2026`, `2025-26`).              |
+| `--season SEASON`    | Import a whole season by start year (`2025`, `2025-26`).            |
 | `--days N`           | Without `--season`: days back from today to import (default: 17).   |
 | `--include-future`   | Also import games that have not finished yet.                       |
 | `--no-highlights`    | Skip the YouTube highlight search.                                  |
